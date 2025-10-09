@@ -16,37 +16,9 @@ MainWindow::MainWindow(QWidget *parent)
     ui->labelCurrentDir->setText("Current Directory: —");
 
 
-/*
-    // Setup TreeWidget
-    ui->treeWidget->setColumnCount(3);
-    QStringList headers = {"Name", "Size (bytes)", "File Count"};
-    ui->treeWidget->setHeaderLabels(headers);
-
-  // Scan a folder (change this to any folder path)
-    QString rootPath = QDir::homePath();
-    FileNode rootNode;
-    rootNode.name = rootPath;
-    rootNode.path = rootPath;
-    rootNode.isFolder = true;
-
-    scanDirectory(rootPath, rootNode);
-
-    // Populate TreeWidget
-    QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
-    rootItem->setText(0, rootNode.name);
-    rootItem->setText(1, QString::number(rootNode.size));
-    rootItem->setText(2, QString::number(rootNode.fileCount));
-
-    populateTree(rootNode, rootItem);
-
-    ui->treeWidget->addTopLevelItem(rootItem);
-    ui->treeWidget->expandAll();
-}
-*/
-
     // Initialize TreeWidget only (no scan yet)
-    ui->treeWidget->setColumnCount(3);
-    QStringList headers = {"Name", "Size (bytes)", "File Count"};
+    ui->treeWidget->setColumnCount(5);
+    QStringList headers = {"Name", "Size (bytes)", "% of Parent", "Last Modified", "File Count"};
     ui->treeWidget->setHeaderLabels(headers);
 }
 
@@ -67,6 +39,8 @@ void MainWindow::scanDirectory(const QString &path, FileNode &node)
         child.path = entry.filePath();
         child.isFolder = entry.isDir();
         child.size = entry.isFile() ? entry.size() : 0;
+        child.lastModified = entry.lastModified();
+
 
         if (child.isFolder) {
             scanDirectory(child.path, child);
@@ -80,7 +54,6 @@ void MainWindow::scanDirectory(const QString &path, FileNode &node)
         node.children.append(child);
     }
 }
-
 
 
 void MainWindow::onScanClicked()
@@ -108,7 +81,10 @@ void MainWindow::onScanClicked()
     QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
     rootItem->setText(0, rootNode.name);
     rootItem->setText(1, QString::number(rootNode.size));
-    rootItem->setText(2, QString::number(rootNode.fileCount));
+    rootItem->setText(2, "100%");  // root folder is 100% of itself
+    rootItem->setText(3, rootNode.lastModified.toString("yyyy-MM-dd hh:mm"));
+    rootItem->setText(4, QString::number(rootNode.fileCount));
+
 
     populateTree(rootNode, rootItem);
     ui->treeWidget->addTopLevelItem(rootItem);
@@ -117,15 +93,22 @@ void MainWindow::onScanClicked()
 
 }
 
-
-// Populate QTreeWidget recursively
 void MainWindow::populateTree(const FileNode &node, QTreeWidgetItem *parentItem)
 {
     for (const FileNode &child : node.children) {
         QTreeWidgetItem *item = new QTreeWidgetItem(parentItem);
+
+        // Name
         item->setText(0, child.name);
+        // Size
         item->setText(1, QString::number(child.size));
-        item->setText(2, QString::number(child.fileCount));
+        // Percentage of parent
+        double percent = (node.size > 0) ? (100.0 * child.size / node.size) : 0.0;
+        item->setText(2, QString::number(percent, 'f', 2) + "%");
+        // Last modified
+        item->setText(3, child.lastModified.toString("yyyy-MM-dd hh:mm"));
+        // File count
+        item->setText(4, QString::number(child.fileCount));
 
         if (child.isFolder)
             populateTree(child, item);

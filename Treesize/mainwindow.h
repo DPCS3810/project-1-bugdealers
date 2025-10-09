@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QTreeWidget>
+#include <QDateTime>
 
 struct FileNode {
     QString name;
@@ -11,6 +12,8 @@ struct FileNode {
     bool isFolder = false;
     quint64 fileCount = 0;
     QList<FileNode> children;
+    QDateTime lastModified;
+
 };
 
 QT_BEGIN_NAMESPACE
