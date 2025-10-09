@@ -28,6 +28,9 @@ MainWindow::MainWindow(QWidget *parent)
     ui->treeWidget->setColumnCount(5);
     QStringList headers = {"Name", "Size", "% of Parent", "Last Modified", "File Count"};
     ui->treeWidget->setHeaderLabels(headers);
+    ui->treeWidget->setSortingEnabled(true);
+    ui->treeWidget->sortByColumn(0, Qt::AscendingOrder); // optional: default sort by Name
+
 }
 
 MainWindow::~MainWindow()
