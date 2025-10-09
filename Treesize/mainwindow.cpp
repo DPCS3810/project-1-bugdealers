@@ -13,6 +13,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     connect(ui->pushButton_2, &QPushButton::clicked, this, &MainWindow::onScanClicked);
+    ui->labelCurrentDir->setText("Current Directory: —");
+
 
 /*
     // Setup TreeWidget
@@ -91,6 +93,7 @@ void MainWindow::onScanClicked()
 
     // Clear any previous contents
     ui->treeWidget->clear();
+    ui->labelCurrentDir->setText("Current Directory: " + dirPath);
 
     // Create root node
     FileNode rootNode;

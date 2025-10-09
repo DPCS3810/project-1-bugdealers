@@ -84,6 +84,13 @@
      </widget>
     </item>
     <item>
+     <widget class="QLabel" name="labelCurrentDir">
+      <property name="text">
+       <string>Current Directory: -</string>
+      </property>
+     </widget>
+    </item>
+    <item>
      <widget class="QWidget" name="MainView" native="true">
       <layout class="QHBoxLayout" name="horizontalLayout_2">
        <item>
