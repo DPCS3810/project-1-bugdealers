@@ -65,6 +65,10 @@ private slots:
     void resetFilter();
     void onReScanClicked();
     void onCancelScanClicked();
+    void onExportClicked();
+    void exportAsPDF();
+    void exportAsJSON();
+    void exportAsCSV();
 
 
 

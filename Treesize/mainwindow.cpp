@@ -10,7 +10,15 @@
 #include <QInputDialog>
 #include <QFont>
 #include <QMessageBox>
-
+#include <QFileDialog>
+#include <QTextDocument>
+#include <QPrinter>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QTextStream>
+#include <QPrintDialog>
+#include <QTextDocument>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -27,6 +35,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton_3, &QPushButton::clicked, this, &MainWindow::onFilterClicked);
     connect(ui->pushButton_9, &QPushButton::clicked, this, &MainWindow::onReScanClicked);
     connect(ui->pushButton_5, &QPushButton::clicked, this, &MainWindow::onCancelScanClicked);
+    connect(ui->pushButton, &QPushButton::clicked, this, &MainWindow::onExportClicked);
 
     ui->labelCurrentDir->setText("Current Directory: —");
 
@@ -554,3 +563,122 @@ void MainWindow::onReScanClicked()
     ui->progressBar->setFormat("100% (Done)");
 }
 
+void MainWindow::onExportClicked()
+{
+    QMenu menu(this);
+    QAction *pdfAct = menu.addAction("Export as PDF");
+    QAction *jsonAct = menu.addAction("Export as JSON");
+    QAction *csvAct = menu.addAction("Export as CSV");
+
+    connect(pdfAct, &QAction::triggered, this, &MainWindow::exportAsPDF);
+    connect(jsonAct, &QAction::triggered, this, &MainWindow::exportAsJSON);
+    connect(csvAct, &QAction::triggered, this, &MainWindow::exportAsCSV);
+
+    menu.exec(ui->pushButton->mapToGlobal(QPoint(0, ui->pushButton->height())));
+}
+
+void MainWindow::exportAsCSV()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, "Save CSV", QDir::homePath(), "CSV Files (*.csv)");
+    if (filePath.isEmpty()) return;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+
+    QTextStream out(&file);
+    out << "Name,Size,% of Parent,Last Modified,File Count\n";
+
+    std::function<void(QTreeWidgetItem*, int)> writeItem = [&](QTreeWidgetItem *item, int level) {
+        if (!item) return;
+        QString indent(level * 2, ' ');  // indent for subitems
+        out << indent << item->text(0) << ","
+            << item->text(1) << ","
+            << item->text(2) << ","
+            << item->text(3) << ","
+            << item->text(4) << "\n";
+
+        for (int i = 0; i < item->childCount(); ++i)
+            writeItem(item->child(i), level + 1);
+    };
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        writeItem(ui->treeWidget->topLevelItem(i), 0);
+
+    file.close();
+    QMessageBox::information(this, "Export CSV", "Export completed successfully.");
+}
+
+void MainWindow::exportAsJSON()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, "Save JSON", QDir::homePath(), "JSON Files (*.json)");
+    if (filePath.isEmpty()) return;
+
+    std::function<QJsonObject(QTreeWidgetItem*)> treeItemToJson = [&](QTreeWidgetItem *item) -> QJsonObject {
+        QJsonObject obj;
+        obj["Name"] = item->text(0);
+        obj["Size"] = item->text(1);
+        obj["% of Parent"] = item->text(2);
+        obj["Last Modified"] = item->text(3);
+        obj["File Count"] = item->text(4);
+
+        if (item->childCount() > 0) {
+            QJsonArray children;
+            for (int i = 0; i < item->childCount(); ++i)
+                children.append(treeItemToJson(item->child(i)));
+            obj["Children"] = children;
+        }
+
+        return obj;
+    };
+
+    QJsonArray rootArray;
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        rootArray.append(treeItemToJson(ui->treeWidget->topLevelItem(i)));
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly)) return;
+    file.write(QJsonDocument(rootArray).toJson(QJsonDocument::Indented));
+    file.close();
+
+    QMessageBox::information(this, "Export JSON", "Export completed successfully.");
+}
+
+void MainWindow::exportAsPDF()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, "Save PDF", QDir::homePath(), "PDF Files (*.pdf)");
+    if (filePath.isEmpty()) return;
+
+    QString html;
+    html += "<table border='1' cellspacing='0' cellpadding='3'>";
+    html += "<tr><th>Name</th><th>Size</th><th>% of Parent</th><th>Last Modified</th><th>File Count</th></tr>";
+
+    std::function<void(QTreeWidgetItem*, int)> addRows = [&](QTreeWidgetItem *item, int level) {
+        if (!item) return;
+        html += "<tr>";
+        html += "<td>" + QString(level*2, ' ') + item->text(0) + "</td>";
+        html += "<td>" + item->text(1) + "</td>";
+        html += "<td>" + item->text(2) + "</td>";
+        html += "<td>" + item->text(3) + "</td>";
+        html += "<td>" + item->text(4) + "</td>";
+        html += "</tr>";
+
+        for (int i = 0; i < item->childCount(); ++i)
+            addRows(item->child(i), level + 1);
+    };
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        addRows(ui->treeWidget->topLevelItem(i), 0);
+
+    html += "</table>";
+
+    QTextDocument doc;
+    doc.setHtml(html);
+
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(filePath);
+
+    doc.print(&printer);
+
+    QMessageBox::information(this, "Export PDF", "Export completed successfully.");
+}
