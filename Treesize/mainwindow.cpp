@@ -109,7 +109,9 @@ void MainWindow::onScanClicked()
 
     populateTree(rootNode, rootItem);
     ui->treeWidget->addTopLevelItem(rootItem);
-    ui->treeWidget->expandAll();
+    //ui->treeWidget->expandAll();
+    ui->treeWidget->topLevelItem(0)->setExpanded(true);
+
 }
 
 
