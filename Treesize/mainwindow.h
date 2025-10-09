@@ -30,5 +30,9 @@ private:
 
     void scanDirectory(const QString &path, FileNode &node);
     void populateTree(const FileNode &node, QTreeWidgetItem *parentItem);
+
+private slots:
+    void onScanClicked();
+
 };
 #endif // MAINWINDOW_H
