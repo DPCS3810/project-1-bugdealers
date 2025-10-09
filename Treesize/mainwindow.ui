@@ -14,6 +14,11 @@
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
+   <property name="styleSheet">
+    <string notr="true">background-color: #F1FAFA
+
+</string>
+   </property>
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
      <widget class="QWidget" name="ToolBar" native="true">
@@ -22,6 +27,23 @@
         <horstretch>0</horstretch>
         <verstretch>0</verstretch>
        </sizepolicy>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">#ToolBar {
+background-color: #D1EDED;
+}
+#ToolBar QPushButton {
+background-color: white; /* normal button color */
+color: black; /* text color */
+border: 1px solid #133333; /* border color */
+border-radius: 5px; /* rounded corners */
+padding: 5px 12px; /* space inside button */
+}
+/* Hover effect for buttons */
+#ToolBar QPushButton:hover {
+background-color: #F1FAFA; /* darker blue on hover */
+}
+</string>
       </property>
       <layout class="QHBoxLayout" name="horizontalLayout">
        <item>
@@ -134,6 +156,25 @@
       <layout class="QHBoxLayout" name="horizontalLayout_3">
        <item>
         <widget class="QProgressBar" name="progressBar">
+         <property name="styleSheet">
+          <string notr="true">/* ProgressBar overall background */
+QProgressBar {
+border: 2px solid #555; /* border around the bar */
+border-radius: 5px; /* rounded corners */
+background-color: #f0f0f0; /* color of the empty part */
+text-align: center; /* center the percentage text */
+font-weight: bold; /* make text bold */
+}
+QProgressBar::chunk {
+background-color: qlineargradient(
+x1:0, y1:0, x2:1, y2:0, /* left to right gradient */
+stop:0 #CCEBEB, /* start color */
+stop:1 #47B8B8 /* end color */
+);
+border-radius: 5px; /* rounded edges for smooth fill */
+}
+</string>
+         </property>
          <property name="value">
           <number>24</number>
          </property>
@@ -141,6 +182,22 @@
        </item>
        <item>
         <widget class="QPushButton" name="pushButton_9">
+         <property name="styleSheet">
+          <string notr="true">/* Styles for the single button */
+#pushButton_9 {
+    background-color: white;       /* normal button color */
+    color: black;                  /* text color */
+    border: 1px solid #133333;    /* border color */
+    border-radius: 5px;            /* rounded corners */
+    padding: 5px 12px;             /* space inside button */
+}
+
+/* Hover effect for the button */
+#pushButton_9:hover {
+    background-color: #F1FAFA;    /* color on hover */
+}
+</string>
+         </property>
          <property name="text">
           <string>Re Scan</string>
          </property>
