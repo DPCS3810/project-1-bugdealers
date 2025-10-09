@@ -19,6 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton_2, &QPushButton::clicked, this, &MainWindow::onScanClicked);
     connect(ui->pushButton_7, &QPushButton::clicked, this, &MainWindow::onTextViewSettingsClicked);
     connect(ui->pushButton_4, &QPushButton::clicked, this, &MainWindow::onSearchClicked);
+    connect(ui->pushButton_3, &QPushButton::clicked, this, &MainWindow::onFilterClicked);
 
     ui->labelCurrentDir->setText("Current Directory: —");
 
@@ -220,6 +221,169 @@ void MainWindow::onFontSizeSelected()
         font.setPointSize(fontSize);
         ui->treeWidget->setFont(font);
     }
+}
+
+void MainWindow::onFilterClicked()
+{
+    QMenu menu(this);
+
+    QAction *sizeAct = menu.addAction("By size");
+    QAction *countAct = menu.addAction("By file count");
+    QAction *formatAct = menu.addAction("By format");
+    QAction *resetAct = menu.addAction("Reset filter");  // <-- new
+
+    connect(sizeAct, &QAction::triggered, this, &MainWindow::filterBySize);
+    connect(countAct, &QAction::triggered, this, &MainWindow::filterByFileCount);
+    connect(formatAct, &QAction::triggered, this, &MainWindow::filterByFormat);
+    connect(resetAct, &QAction::triggered, this, &MainWindow::resetFilter); // <-- new
+
+    menu.exec(ui->pushButton_3->mapToGlobal(QPoint(0, ui->pushButton_3->height())));
+}
+
+
+void MainWindow::filterBySize()
+{
+    bool ok;
+    double value = QInputDialog::getDouble(this, "Filter by size",
+                                           "Enter size value:",
+                                           0, 0, 1e12, 2, &ok);
+    if (!ok) return;
+
+    QStringList options = {"Less than", "Greater than"};
+    bool ok2;
+    QString choice = QInputDialog::getItem(this, "Choose comparison",
+                                           "Filter:", options, 0, false, &ok2);
+    if (!ok2) return;
+
+    bool greater = (choice == "Greater than");
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        filterTreeBySize(ui->treeWidget->topLevelItem(i), value, greater);
+}
+
+bool MainWindow::filterTreeBySize(QTreeWidgetItem *item, double size, bool greater)
+{
+    // Parse item size (strip suffix)
+    QString text = item->text(1);
+    double itemSize = text.split(" ").first().toDouble();
+
+    bool match = greater ? (itemSize > size) : (itemSize < size);
+
+    bool childMatch = false;
+    for (int i = 0; i < item->childCount(); ++i) {
+        bool childVisible = filterTreeBySize(item->child(i), size, greater);
+        item->child(i)->setHidden(!childVisible);
+        if (childVisible) childMatch = true;
+    }
+
+    bool visible = match || childMatch;
+    item->setHidden(!visible);
+    return visible;
+}
+void MainWindow::filterByFileCount()
+{
+    bool ok;
+    quint64 value = QInputDialog::getInt(this, "Filter by file count",
+                                         "Enter file count:", 0, 0, 1e9, 1, &ok);
+    if (!ok) return;
+
+    QStringList options = {"Less than", "Greater than"};
+    bool ok2;
+    QString choice = QInputDialog::getItem(this, "Choose comparison",
+                                           "Filter:", options, 0, false, &ok2);
+    if (!ok2) return;
+
+    bool greater = (choice == "Greater than");
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        filterTreeByCount(ui->treeWidget->topLevelItem(i), value, greater);
+}
+
+bool MainWindow::filterTreeByCount(QTreeWidgetItem *item, quint64 count, bool greater)
+{
+    quint64 fileCount = item->text(4).toULongLong();
+    bool match = greater ? (fileCount > count) : (fileCount < count);
+
+    bool childMatch = false;
+    for (int i = 0; i < item->childCount(); ++i) {
+        bool childVisible = filterTreeByCount(item->child(i), count, greater);
+        item->child(i)->setHidden(!childVisible);
+        if (childVisible) childMatch = true;
+    }
+
+    bool visible = match || childMatch;
+    item->setHidden(!visible);
+    return visible;
+}
+
+void MainWindow::filterByFormat()
+{
+    // Collect unique extensions from tree
+    QSet<QString> extSet;
+    std::function<void(QTreeWidgetItem*)> collectExt = [&](QTreeWidgetItem *item){
+        if (item->childCount() == 0) {
+            QString name = item->text(0);
+            int dotIdx = name.lastIndexOf('.');
+            if (dotIdx > 0) extSet.insert(name.mid(dotIdx).toLower());
+        }
+        for (int i = 0; i < item->childCount(); ++i)
+            collectExt(item->child(i));
+    };
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        collectExt(ui->treeWidget->topLevelItem(i));
+
+    if (extSet.isEmpty()) return;
+
+    QStringList extList;
+    for (const QString &ext : extSet)
+        extList.append(ext);
+
+    bool ok;
+    QString choice = QInputDialog::getItem(this, "Filter by format",
+                                           "Choose extension:", extList, 0, false, &ok);
+    if (!ok) return;
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        filterTreeByFormat(ui->treeWidget->topLevelItem(i), QStringList() << choice);
+}
+
+bool MainWindow::filterTreeByFormat(QTreeWidgetItem *item, const QStringList &extList)
+{
+    bool match = false;
+    if (item->childCount() == 0) { // only files
+        QString name = item->text(0);
+        int dotIdx = name.lastIndexOf('.');
+        if (dotIdx > 0) {
+            QString ext = name.mid(dotIdx).toLower();
+            if (extList.contains(ext)) match = true;
+        }
+    }
+
+    bool childMatch = false;
+    for (int i = 0; i < item->childCount(); ++i) {
+        bool childVisible = filterTreeByFormat(item->child(i), extList);
+        item->child(i)->setHidden(!childVisible);
+        if (childVisible) childMatch = true;
+    }
+
+    bool visible = match || childMatch;
+    item->setHidden(!visible);
+    return visible;
+}
+
+void MainWindow::resetFilter()
+{
+    // Recursively unhide all items
+    std::function<void(QTreeWidgetItem*)> unhideAll = [&](QTreeWidgetItem *item){
+        if (!item) return;
+        item->setHidden(false);
+        for (int i = 0; i < item->childCount(); ++i)
+            unhideAll(item->child(i));
+    };
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        unhideAll(ui->treeWidget->topLevelItem(i));
 }
 
 

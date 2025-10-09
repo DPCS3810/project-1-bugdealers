@@ -38,6 +38,9 @@ private:
     void updateTreeDisplay();  // refresh display after settings change
     QLineEdit *searchBox = nullptr;
     bool filterTree(QTreeWidgetItem *item, const QString &query);
+    bool filterTreeBySize(QTreeWidgetItem *item, double size, bool greater);
+    bool filterTreeByCount(QTreeWidgetItem *item, quint64 count, bool greater);
+    bool filterTreeByFormat(QTreeWidgetItem *item, const QStringList &extList);
 
 private slots:
     void onScanClicked();
@@ -45,6 +48,11 @@ private slots:
     void onFontSizeSelected();
     void onSearchClicked();
     void onSearchTextChanged(const QString &text);
+    void onFilterClicked();
+    void filterBySize();
+    void filterByFileCount();
+    void filterByFormat();
+    void resetFilter();
 
 };
 #endif // MAINWINDOW_H
