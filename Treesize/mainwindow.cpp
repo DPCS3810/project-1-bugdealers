@@ -18,6 +18,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(ui->pushButton_2, &QPushButton::clicked, this, &MainWindow::onScanClicked);
     connect(ui->pushButton_7, &QPushButton::clicked, this, &MainWindow::onTextViewSettingsClicked);
+    connect(ui->pushButton_4, &QPushButton::clicked, this, &MainWindow::onSearchClicked);
 
     ui->labelCurrentDir->setText("Current Directory: —");
 
@@ -123,6 +124,60 @@ void MainWindow::onTextViewSettingsClicked()
 
     // Show menu under the button
     menu.exec(ui->pushButton_7->mapToGlobal(QPoint(0, ui->pushButton_7->height())));
+}
+
+void MainWindow::onSearchClicked()
+{
+    if (!searchBox) {
+        // Create the search box once
+        searchBox = new QLineEdit(this);
+        searchBox->setPlaceholderText("Search files or folders...");
+        searchBox->setClearButtonEnabled(true);
+        searchBox->setFixedWidth(250);
+
+        // Position it under the toolbar button
+        QPoint globalPos = ui->pushButton_4->mapToGlobal(QPoint(0, ui->pushButton_4->height()));
+        searchBox->move(mapFromGlobal(globalPos) + QPoint(0, 5));
+
+        connect(searchBox, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
+    }
+
+    // Toggle visibility
+    if (searchBox->isVisible()) {
+        searchBox->hide();
+        searchBox->clear();
+        // Restore tree visibility
+        onSearchTextChanged("");
+    } else {
+        searchBox->show();
+        searchBox->setFocus();
+    }
+}
+
+
+void MainWindow::onSearchTextChanged(const QString &text)
+{
+    QString query = text.trimmed();
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = ui->treeWidget->topLevelItem(i);
+        filterTree(item, query);
+    }
+}
+
+bool MainWindow::filterTree(QTreeWidgetItem *item, const QString &query)
+{
+    bool match = query.isEmpty() || item->text(0).contains(query, Qt::CaseInsensitive);
+
+    bool childMatch = false;
+    for (int i = 0; i < item->childCount(); ++i) {
+        bool childVisible = filterTree(item->child(i), query);
+        item->child(i)->setHidden(!childVisible);
+        if (childVisible) childMatch = true;
+    }
+
+    bool visible = match || childMatch;
+    item->setHidden(!visible);
+    return visible;
 }
 
 void MainWindow::updateTreeDisplay()

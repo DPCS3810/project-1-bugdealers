@@ -36,11 +36,15 @@ private:
     enum SizeUnit { BYTES, KB, MB, GB };
     SizeUnit currentUnit = BYTES;
     void updateTreeDisplay();  // refresh display after settings change
+    QLineEdit *searchBox = nullptr;
+    bool filterTree(QTreeWidgetItem *item, const QString &query);
 
 private slots:
     void onScanClicked();
     void onTextViewSettingsClicked();
     void onFontSizeSelected();
+    void onSearchClicked();
+    void onSearchTextChanged(const QString &text);
 
 };
 #endif // MAINWINDOW_H
