@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QTreeWidget>
 #include <QDateTime>
+#include <QElapsedTimer>
 
 struct FileNode {
     QString name;
@@ -41,6 +42,12 @@ private:
     bool filterTreeBySize(QTreeWidgetItem *item, double size, bool greater);
     bool filterTreeByCount(QTreeWidgetItem *item, quint64 count, bool greater);
     bool filterTreeByFormat(QTreeWidgetItem *item, const QStringList &extList);
+
+    quint64 totalItems = 0;   // total files/folders to scan
+    quint64 scannedItems = 0;  // progress count
+    QElapsedTimer timer;       // track elapsed time
+
+    void countTotalItems(const QString &path); // helper
 
 private slots:
     void onScanClicked();
