@@ -26,6 +26,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton_4, &QPushButton::clicked, this, &MainWindow::onSearchClicked);
     connect(ui->pushButton_3, &QPushButton::clicked, this, &MainWindow::onFilterClicked);
     connect(ui->pushButton_9, &QPushButton::clicked, this, &MainWindow::onReScanClicked);
+    connect(ui->pushButton_5, &QPushButton::clicked, this, &MainWindow::onCancelScanClicked);
 
     ui->labelCurrentDir->setText("Current Directory: —");
 
@@ -47,10 +48,12 @@ MainWindow::~MainWindow()
 // Recursive DFS scan
 void MainWindow::scanDirectory(const QString &path, FileNode &node)
 {
+    if (cancelScan) return; // stop immediately if cancelled
     QDir dir(path);
     QFileInfoList entries = dir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries);
 
     for (QFileInfo entry : entries) {
+        if (cancelScan) return; // stop mid-loop if cancelled
         FileNode child;
         child.name = entry.fileName();
         child.path = entry.filePath();
@@ -81,10 +84,40 @@ void MainWindow::scanDirectory(const QString &path, FileNode &node)
     }
 }
 
+
+void MainWindow::onCancelScanClicked()
+{
+    if (!currentDirPath.isEmpty() && !cancelScan) {
+        cancelScan = true;  // signal scanDirectory to stop
+
+        // Clear the tree view
+        ui->treeWidget->clear();
+
+        // Reset progress bar
+        ui->progressBar->setValue(0);
+        ui->progressBar->setFormat("0%");
+
+        // Reset any scan counters
+        scannedItems = 0;
+        totalItems = 0;
+
+        QMessageBox::information(this, "Scan Cancelled", "The scan has been cancelled.");
+    }
+}
+
+
+
 void MainWindow::onScanClicked()
 {
+
     QString dirPath = QFileDialog::getExistingDirectory(this, "Select Folder to Scan", QDir::homePath());
     if (dirPath.isEmpty()) return;
+
+    cancelScan = false;      // allow scan to proceed
+    scannedItems = 0;        // reset progress counter
+    timer.start();           // start elapsed timer
+    ui->progressBar->setValue(0);
+    ui->progressBar->setFormat("0%");
 
     currentDirPath = dirPath; // store for re-scan
     ui->progressBar->setValue(0);
@@ -113,6 +146,15 @@ void MainWindow::onScanClicked()
 
     // Scan directory
     scanDirectory(dirPath, rootNode);
+
+    //Check if scan was cancelled before populating the tree**
+    if (cancelScan) {
+        // Do not show any results
+        ui->treeWidget->clear();
+        ui->progressBar->setValue(0);
+        ui->progressBar->setFormat("0%");
+        return;
+    }
 
     // Populate tree
     QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
@@ -457,6 +499,11 @@ void MainWindow::countTotalItems(const QString &path)
 
 void MainWindow::onReScanClicked()
 {
+    cancelScan = false;      // allow scan to proceed
+    scannedItems = 0;        // reset progress counter
+    timer.start();           // start elapsed timer
+    ui->progressBar->setValue(0);
+    ui->progressBar->setFormat("0%");
     if (currentDirPath.isEmpty()) {
         // no folder scanned yet
         QMessageBox::information(this, "Re Scan", "No folder has been scanned yet.");
@@ -481,6 +528,15 @@ void MainWindow::onReScanClicked()
     rootNode.isFolder = true;
 
     scanDirectory(currentDirPath, rootNode);
+
+    //Check if scan was cancelled before populating the tree**
+    if (cancelScan) {
+        // Do not show any results
+        ui->treeWidget->clear();
+        ui->progressBar->setValue(0);
+        ui->progressBar->setFormat("0%");
+        return;
+    }
 
     QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
     rootItem->setText(0, rootNode.name);

@@ -49,6 +49,8 @@ private:
 
     void countTotalItems(const QString &path); // helper
     QString currentDirPath;
+    bool cancelScan = false; // track if the scan was canceled
+
 
 private slots:
     void onScanClicked();
@@ -62,6 +64,8 @@ private slots:
     void filterByFormat();
     void resetFilter();
     void onReScanClicked();
+    void onCancelScanClicked();
+
 
 
 };
