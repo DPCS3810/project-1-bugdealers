@@ -48,6 +48,7 @@ private:
     QElapsedTimer timer;       // track elapsed time
 
     void countTotalItems(const QString &path); // helper
+    QString currentDirPath;
 
 private slots:
     void onScanClicked();
@@ -60,6 +61,8 @@ private slots:
     void filterByFileCount();
     void filterByFormat();
     void resetFilter();
+    void onReScanClicked();
+
 
 };
 #endif // MAINWINDOW_H

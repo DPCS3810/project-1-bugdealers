@@ -9,6 +9,8 @@
 #include <QAction>
 #include <QInputDialog>
 #include <QFont>
+#include <QMessageBox>
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -23,6 +25,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton_7, &QPushButton::clicked, this, &MainWindow::onTextViewSettingsClicked);
     connect(ui->pushButton_4, &QPushButton::clicked, this, &MainWindow::onSearchClicked);
     connect(ui->pushButton_3, &QPushButton::clicked, this, &MainWindow::onFilterClicked);
+    connect(ui->pushButton_9, &QPushButton::clicked, this, &MainWindow::onReScanClicked);
 
     ui->labelCurrentDir->setText("Current Directory: —");
 
@@ -42,34 +45,6 @@ MainWindow::~MainWindow()
 }
 
 // Recursive DFS scan
-/*void MainWindow::scanDirectory(const QString &path, FileNode &node)
-{
-    QDir dir(path);
-    QFileInfoList entries = dir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries);
-
-    for (QFileInfo entry : entries) {
-        FileNode child;
-        child.name = entry.fileName();
-        child.path = entry.filePath();
-        child.isFolder = entry.isDir();
-        child.size = entry.isFile() ? entry.size() : 0;
-        child.lastModified = entry.lastModified();
-
-
-        if (child.isFolder) {
-            scanDirectory(child.path, child);
-            node.size += child.size;
-            node.fileCount += child.fileCount;
-        } else {
-            node.size += child.size;
-            node.fileCount += 1;
-        }
-
-        node.children.append(child);
-    }
-}
-*/
-
 void MainWindow::scanDirectory(const QString &path, FileNode &node)
 {
     QDir dir(path);
@@ -106,51 +81,12 @@ void MainWindow::scanDirectory(const QString &path, FileNode &node)
     }
 }
 
-
-
-/*void MainWindow::onScanClicked()
-{
-    // Open file dialog to select a directory
-    QString dirPath = QFileDialog::getExistingDirectory(this, "Select Folder to Scan", QDir::homePath());
-
-    if (dirPath.isEmpty())
-        return; // user cancelled
-
-    // Clear any previous contents
-    ui->treeWidget->clear();
-    ui->labelCurrentDir->setText("Current Directory: " + dirPath);
-
-    // Create root node
-    FileNode rootNode;
-    rootNode.name = dirPath;
-    rootNode.path = dirPath;
-    rootNode.isFolder = true;
-
-    // Run the directory scan
-    scanDirectory(dirPath, rootNode);
-
-    // Populate TreeWidget
-    QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
-    rootItem->setText(0, rootNode.name);
-    rootItem->setText(1, QString::number(rootNode.size));
-    rootItem->setText(2, "100%");  // root folder is 100% of itself
-    rootItem->setText(3, rootNode.lastModified.toString("yyyy-MM-dd hh:mm"));
-    rootItem->setText(4, QString::number(rootNode.fileCount));
-
-
-    populateTree(rootNode, rootItem);
-    ui->treeWidget->addTopLevelItem(rootItem);
-    //ui->treeWidget->expandAll();
-    ui->treeWidget->topLevelItem(0)->setExpanded(true);
-    updateTreeDisplay();
-}
-*/
-
 void MainWindow::onScanClicked()
 {
     QString dirPath = QFileDialog::getExistingDirectory(this, "Select Folder to Scan", QDir::homePath());
     if (dirPath.isEmpty()) return;
 
+    currentDirPath = dirPath; // store for re-scan
     ui->progressBar->setValue(0);
     ui->progressBar->setFormat("0%");
 
@@ -517,5 +453,48 @@ void MainWindow::countTotalItems(const QString &path)
             countTotalItems(entry.filePath());
         }
     }
+}
+
+void MainWindow::onReScanClicked()
+{
+    if (currentDirPath.isEmpty()) {
+        // no folder scanned yet
+        QMessageBox::information(this, "Re Scan", "No folder has been scanned yet.");
+        return;
+    }
+
+    // clear tree and reset progress
+    ui->treeWidget->clear();
+    ui->progressBar->setValue(0);
+    ui->progressBar->setFormat("0%");
+    ui->labelCurrentDir->setText("Current Directory: " + currentDirPath);
+
+    totalItems = 0;
+    scannedItems = 0;
+    timer.start();
+
+    countTotalItems(currentDirPath);
+
+    FileNode rootNode;
+    rootNode.name = currentDirPath;
+    rootNode.path = currentDirPath;
+    rootNode.isFolder = true;
+
+    scanDirectory(currentDirPath, rootNode);
+
+    QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
+    rootItem->setText(0, rootNode.name);
+    rootItem->setText(1, QString::number(rootNode.size));
+    rootItem->setText(2, "100%");
+    rootItem->setText(3, rootNode.lastModified.toString("yyyy-MM-dd hh:mm"));
+    rootItem->setText(4, QString::number(rootNode.fileCount));
+
+    populateTree(rootNode, rootItem);
+    ui->treeWidget->addTopLevelItem(rootItem);
+    ui->treeWidget->topLevelItem(0)->setExpanded(true);
+    updateTreeDisplay();
+
+    ui->progressBar->setValue(100);
+    ui->progressBar->setFormat("100% (Done)");
 }
 
