@@ -33,9 +33,14 @@ private:
 
     void scanDirectory(const QString &path, FileNode &node);
     void populateTree(const FileNode &node, QTreeWidgetItem *parentItem);
+    enum SizeUnit { BYTES, KB, MB, GB };
+    SizeUnit currentUnit = BYTES;
+    void updateTreeDisplay();  // refresh display after settings change
 
 private slots:
     void onScanClicked();
+    void onTextViewSettingsClicked();
+    void onFontSizeSelected();
 
 };
 #endif // MAINWINDOW_H

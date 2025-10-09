@@ -5,6 +5,10 @@
 #include <QTreeWidgetItem>
 #include <QDebug>
 #include <QFileDialog>
+#include <QMenu>
+#include <QAction>
+#include <QInputDialog>
+#include <QFont>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -13,12 +17,14 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     connect(ui->pushButton_2, &QPushButton::clicked, this, &MainWindow::onScanClicked);
+    connect(ui->pushButton_7, &QPushButton::clicked, this, &MainWindow::onTextViewSettingsClicked);
+
     ui->labelCurrentDir->setText("Current Directory: —");
 
 
     // Initialize TreeWidget only (no scan yet)
     ui->treeWidget->setColumnCount(5);
-    QStringList headers = {"Name", "Size (bytes)", "% of Parent", "Last Modified", "File Count"};
+    QStringList headers = {"Name", "Size", "% of Parent", "Last Modified", "File Count"};
     ui->treeWidget->setHeaderLabels(headers);
 }
 
@@ -90,8 +96,77 @@ void MainWindow::onScanClicked()
     ui->treeWidget->addTopLevelItem(rootItem);
     //ui->treeWidget->expandAll();
     ui->treeWidget->topLevelItem(0)->setExpanded(true);
-
+    updateTreeDisplay();
 }
+
+void MainWindow::onTextViewSettingsClicked()
+{
+    // Create main menu
+    QMenu menu(this);
+
+    // Add submenus
+    QMenu *sizeMenu = menu.addMenu("Size View (KB, MB, GB)");
+    QAction *kbAct = sizeMenu->addAction("KB");
+    QAction *mbAct = sizeMenu->addAction("MB");
+    QAction *gbAct = sizeMenu->addAction("GB");
+    sizeMenu->addSeparator();
+    QAction *bytesAct = sizeMenu->addAction("Bytes");
+
+    QAction *fontSizeAct = menu.addAction("Font Size");
+
+    // Connect actions
+    connect(kbAct, &QAction::triggered, [this]() { currentUnit = KB; updateTreeDisplay(); });
+    connect(mbAct, &QAction::triggered, [this]() { currentUnit = MB; updateTreeDisplay(); });
+    connect(gbAct, &QAction::triggered, [this]() { currentUnit = GB; updateTreeDisplay(); });
+    connect(bytesAct, &QAction::triggered, [this]() { currentUnit = BYTES; updateTreeDisplay(); });
+    connect(fontSizeAct, &QAction::triggered, this, &MainWindow::onFontSizeSelected);
+
+    // Show menu under the button
+    menu.exec(ui->pushButton_7->mapToGlobal(QPoint(0, ui->pushButton_7->height())));
+}
+
+void MainWindow::updateTreeDisplay()
+{
+    // Lambda to format size
+    auto formatSize = [this](quint64 size) {
+        double val = size;
+        QString suffix = " bytes";
+        switch (currentUnit) {
+        case KB: val = size / 1024.0; suffix = " KB"; break;
+        case MB: val = size / (1024.0 * 1024.0); suffix = " MB"; break;
+        case GB: val = size / (1024.0 * 1024.0 * 1024.0); suffix = " GB"; break;
+        default: break;
+        }
+        return QString::number(val, 'f', 2) + suffix;
+    };
+
+    // Update every item recursively
+    std::function<void(QTreeWidgetItem*)> updateItem = [&](QTreeWidgetItem *item) {
+        if (!item) return;
+        bool ok;
+        quint64 size = item->text(1).split(" ").first().toDouble(&ok);
+        if (ok) item->setText(1, formatSize(size));
+
+        for (int i = 0; i < item->childCount(); ++i)
+            updateItem(item->child(i));
+    };
+
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        updateItem(ui->treeWidget->topLevelItem(i));
+}
+
+void MainWindow::onFontSizeSelected()
+{
+    bool ok;
+    int fontSize = QInputDialog::getInt(this, "Font Size", "Enter font size:",
+                                        ui->treeWidget->font().pointSize(), 8, 48, 1, &ok);
+    if (ok) {
+        QFont font = ui->treeWidget->font();
+        font.setPointSize(fontSize);
+        ui->treeWidget->setFont(font);
+    }
+}
+
 
 void MainWindow::populateTree(const FileNode &node, QTreeWidgetItem *parentItem)
 {
