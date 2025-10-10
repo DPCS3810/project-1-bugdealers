@@ -188,6 +188,7 @@ void MainWindow::onScanClicked()
     QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
     rootItem->setText(0, rootNode.name);
     rootItem->setText(1, QString::number(rootNode.size));
+    rootItem->setData(1, Qt::UserRole, QVariant::fromValue((qulonglong)rootNode.size));
     rootItem->setText(2, "100%");
     rootItem->setText(3, rootNode.lastModified.toString("yyyy-MM-dd hh:mm"));
     rootItem->setText(4, QString::number(rootNode.fileCount));
@@ -286,25 +287,49 @@ bool MainWindow::filterTree(QTreeWidgetItem *item, const QString &query)
 
 void MainWindow::updateTreeDisplay()
 {
-    // Lambda to format size
-    auto formatSize = [this](quint64 size) {
-        double val = size;
+    // Helper to format bytes according to currentUnit
+    auto formatSize = [this](quint64 bytes) -> QString {
+        double val = (double)bytes;
         QString suffix = " bytes";
         switch (currentUnit) {
-        case KB: val = size / 1024.0; suffix = " KB"; break;
-        case MB: val = size / (1024.0 * 1024.0); suffix = " MB"; break;
-        case GB: val = size / (1024.0 * 1024.0 * 1024.0); suffix = " GB"; break;
+        case KB: val = val / 1024.0; suffix = " KB"; break;
+        case MB: val = val / (1024.0 * 1024.0); suffix = " MB"; break;
+        case GB: val = val / (1024.0 * 1024.0 * 1024.0); suffix = " GB"; break;
         default: break;
         }
         return QString::number(val, 'f', 2) + suffix;
     };
 
-    // Update every item recursively
     std::function<void(QTreeWidgetItem*)> updateItem = [&](QTreeWidgetItem *item) {
         if (!item) return;
-        bool ok;
-        quint64 size = item->text(1).split(" ").first().toDouble(&ok);
-        if (ok) item->setText(1, formatSize(size));
+
+        // Prefer stored raw bytes
+        quint64 sizeBytes = 0;
+        QVariant v = item->data(1, Qt::UserRole);
+        if (v.isValid()) {
+            sizeBytes = v.toULongLong();
+        } else {
+            // backward-compatibility: try to parse displayed text
+            bool ok = false;
+            QString txt = item->text(1);
+            double parsed = txt.split(" ").first().toDouble(&ok);
+            if (ok) {
+                if (txt.contains("KB", Qt::CaseInsensitive)) {
+                    sizeBytes = (quint64)(parsed * 1024.0);
+                } else if (txt.contains("MB", Qt::CaseInsensitive)) {
+                    sizeBytes = (quint64)(parsed * 1024.0 * 1024.0);
+                } else if (txt.contains("GB", Qt::CaseInsensitive)) {
+                    sizeBytes = (quint64)(parsed * 1024.0 * 1024.0 * 1024.0);
+                } else {
+                    sizeBytes = (quint64)parsed;
+                }
+                // store corrected raw value for future
+                item->setData(1, Qt::UserRole, QVariant::fromValue((qulonglong)sizeBytes));
+            }
+        }
+
+        // Now set formatted text for display
+        item->setText(1, formatSize(sizeBytes));
 
         for (int i = 0; i < item->childCount(); ++i)
             updateItem(item->child(i));
@@ -313,6 +338,7 @@ void MainWindow::updateTreeDisplay()
     for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
         updateItem(ui->treeWidget->topLevelItem(i));
 }
+
 
 void MainWindow::onFontSizeSelected()
 {
@@ -360,21 +386,55 @@ void MainWindow::filterBySize()
 
     bool greater = (choice == "Greater than");
 
+    // Convert entered value into bytes according to currentUnit
+    auto toBytes = [this](double v)->quint64 {
+        switch (currentUnit) {
+        case BYTES: return (quint64) v;
+        case KB:    return (quint64)(v * 1024.0);
+        case MB:    return (quint64)(v * 1024.0 * 1024.0);
+        case GB:    return (quint64)(v * 1024.0 * 1024.0 * 1024.0);
+        default:    return (quint64) v;
+        }
+    };
+
+    quint64 valueBytes = toBytes(value);
+
     for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        filterTreeBySize(ui->treeWidget->topLevelItem(i), value, greater);
+        filterTreeBySize(ui->treeWidget->topLevelItem(i), valueBytes, greater);
 }
 
-bool MainWindow::filterTreeBySize(QTreeWidgetItem *item, double size, bool greater)
-{
-    // Parse item size (strip suffix)
-    QString text = item->text(1);
-    double itemSize = text.split(" ").first().toDouble();
 
-    bool match = greater ? (itemSize > size) : (itemSize < size);
+bool MainWindow::filterTreeBySize(QTreeWidgetItem *item, quint64 sizeBytes, bool greater)
+{
+    // Get item size from stored data (fall back to parsing text if needed)
+    quint64 itemSize = 0;
+    QVariant v = item->data(1, Qt::UserRole);
+    if (v.isValid()) {
+        itemSize = v.toULongLong();
+    } else {
+        // try parsing displayed text
+        bool ok;
+        QString txt = item->text(1);
+        double parsed = txt.split(" ").first().toDouble(&ok);
+        if (ok) {
+            if (txt.contains("KB", Qt::CaseInsensitive)) {
+                itemSize = (quint64)(parsed * 1024.0);
+            } else if (txt.contains("MB", Qt::CaseInsensitive)) {
+                itemSize = (quint64)(parsed * 1024.0 * 1024.0);
+            } else if (txt.contains("GB", Qt::CaseInsensitive)) {
+                itemSize = (quint64)(parsed * 1024.0 * 1024.0 * 1024.0);
+            } else {
+                itemSize = (quint64)parsed;
+            }
+            item->setData(1, Qt::UserRole, QVariant::fromValue((qulonglong)itemSize));
+        }
+    }
+
+    bool match = greater ? (itemSize > sizeBytes) : (itemSize < sizeBytes);
 
     bool childMatch = false;
     for (int i = 0; i < item->childCount(); ++i) {
-        bool childVisible = filterTreeBySize(item->child(i), size, greater);
+        bool childVisible = filterTreeBySize(item->child(i), sizeBytes, greater);
         item->child(i)->setHidden(!childVisible);
         if (childVisible) childMatch = true;
     }
@@ -383,6 +443,8 @@ bool MainWindow::filterTreeBySize(QTreeWidgetItem *item, double size, bool great
     item->setHidden(!visible);
     return visible;
 }
+
+
 void MainWindow::filterByFileCount()
 {
     bool ok;
@@ -497,7 +559,9 @@ void MainWindow::populateTree(const FileNode &node, QTreeWidgetItem *parentItem)
 
         // Name
         item->setText(0, child.name);
-        // Size
+        // Store raw size in UserRole (source of truth)
+        item->setData(1, Qt::UserRole, QVariant::fromValue((qulonglong)child.size));
+        // Show initial textual size (will be refreshed by updateTreeDisplay)
         item->setText(1, QString::number(child.size));
         // Percentage of parent
         double percent = (node.size > 0) ? (100.0 * child.size / node.size) : 0.0;
@@ -512,6 +576,7 @@ void MainWindow::populateTree(const FileNode &node, QTreeWidgetItem *parentItem)
             populateTree(child, item);
     }
 }
+
 
 void MainWindow::countTotalItems(const QString &path)
 {
@@ -552,11 +617,10 @@ void MainWindow::onReScanClicked()
 
     countTotalItems(currentDirPath);
 
-    FileNode rootNode;
+    rootNode = FileNode();
     rootNode.name = currentDirPath;
     rootNode.path = currentDirPath;
     rootNode.isFolder = true;
-
     scanDirectory(currentDirPath, rootNode);
 
     //Check if scan was cancelled before populating the tree**
@@ -571,6 +635,7 @@ void MainWindow::onReScanClicked()
     QTreeWidgetItem *rootItem = new QTreeWidgetItem(ui->treeWidget);
     rootItem->setText(0, rootNode.name);
     rootItem->setText(1, QString::number(rootNode.size));
+    rootItem->setData(1, Qt::UserRole, QVariant::fromValue((qulonglong)rootNode.size));
     rootItem->setText(2, "100%");
     rootItem->setText(3, rootNode.lastModified.toString("yyyy-MM-dd hh:mm"));
     rootItem->setText(4, QString::number(rootNode.fileCount));

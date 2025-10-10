@@ -50,7 +50,7 @@ private:
     void updateTreeDisplay();  // refresh display after settings change
     QLineEdit *searchBox = nullptr;
     bool filterTree(QTreeWidgetItem *item, const QString &query);
-    bool filterTreeBySize(QTreeWidgetItem *item, double size, bool greater);
+    bool filterTreeBySize(QTreeWidgetItem *item, quint64 sizeBytes, bool greater);
     bool filterTreeByCount(QTreeWidgetItem *item, quint64 count, bool greater);
     bool filterTreeByFormat(QTreeWidgetItem *item, const QStringList &extList);
 
