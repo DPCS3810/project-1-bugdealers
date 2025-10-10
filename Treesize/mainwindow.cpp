@@ -19,6 +19,15 @@
 #include <QTextStream>
 #include <QPrintDialog>
 #include <QTextDocument>
+#include <QClipboard>
+#include <QApplication>
+#include <QtCharts/QPieSeries>
+#include <QtCharts/QChartView>
+#include <QtCharts/QChart>
+#include <QtCharts/QPieSlice>
+#include <QVBoxLayout>
+#include <QDialog>
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -47,6 +56,9 @@ MainWindow::MainWindow(QWidget *parent)
     ui->treeWidget->setSortingEnabled(true);
     ui->treeWidget->sortByColumn(0, Qt::AscendingOrder); // optional: default sort by Name
 
+    ui->treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->treeWidget, &QTreeWidget::customContextMenuRequested,
+            this, &MainWindow::onTreeItemCustomContextMenu);
 }
 
 MainWindow::~MainWindow()
@@ -147,8 +159,15 @@ void MainWindow::onScanClicked()
     // Start elapsed timer
     timer.start();
 
-    // Create root node
+    /* Create root node
     FileNode rootNode;
+    rootNode.name = dirPath;
+    rootNode.path = dirPath;
+    rootNode.isFolder = true;
+    */
+    // **CHANGE THIS: Store in member variable**
+
+    rootNode = FileNode();  // Clear previous data
     rootNode.name = dirPath;
     rootNode.path = dirPath;
     rootNode.isFolder = true;
@@ -173,6 +192,7 @@ void MainWindow::onScanClicked()
     rootItem->setText(3, rootNode.lastModified.toString("yyyy-MM-dd hh:mm"));
     rootItem->setText(4, QString::number(rootNode.fileCount));
 
+    rootItem->setData(0, Qt::UserRole, rootNode.path);
     populateTree(rootNode, rootItem);
     ui->treeWidget->addTopLevelItem(rootItem);
     ui->treeWidget->topLevelItem(0)->setExpanded(true);
@@ -487,6 +507,7 @@ void MainWindow::populateTree(const FileNode &node, QTreeWidgetItem *parentItem)
         // File count
         item->setText(4, QString::number(child.fileCount));
 
+        item->setData(0, Qt::UserRole, child.path);
         if (child.isFolder)
             populateTree(child, item);
     }
@@ -681,4 +702,285 @@ void MainWindow::exportAsPDF()
     doc.print(&printer);
 
     QMessageBox::information(this, "Export PDF", "Export completed successfully.");
+}
+
+void MainWindow::onTreeItemCustomContextMenu(const QPoint &pos)
+{
+    QTreeWidgetItem *item = ui->treeWidget->itemAt(pos);
+    if (!item) return;
+
+    QMenu menu(this);
+    QAction *viewPathAct = menu.addAction("View Full Path");
+    QAction *pieChartAct = menu.addAction("View 1 Level Pie Chart");
+    QAction *deleteAct = menu.addAction("Delete");
+    QAction *renameAct = menu.addAction("Rename");
+
+    connect(viewPathAct, &QAction::triggered, [this, item]() { showFullPath(item); });
+    connect(pieChartAct, &QAction::triggered, [this, item]() { showPieChart(item); });
+    connect(deleteAct, &QAction::triggered, [this, item]() { deleteItem(item); });
+    connect(renameAct, &QAction::triggered, [this, item]() { renameItem(item); });
+
+    menu.exec(ui->treeWidget->viewport()->mapToGlobal(pos));
+}
+
+void MainWindow::showFullPath(QTreeWidgetItem *item)
+{
+    QString fullPath = item->data(0, Qt::UserRole).toString();
+
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Full Path");
+    msgBox.setText("Full path of the selected item:");
+    msgBox.setInformativeText(fullPath);
+    msgBox.setStandardButtons(QMessageBox::Ok);
+
+    QPushButton *copyButton = msgBox.addButton("Copy Path", QMessageBox::ActionRole);
+
+    msgBox.exec();
+
+    if (msgBox.clickedButton() == copyButton) {
+        QClipboard *clipboard = QApplication::clipboard();
+        clipboard->setText(fullPath);
+        QMessageBox::information(this, "Copied", "Path copied to clipboard!");
+    }
+}
+
+FileNode* MainWindow::findNodeByPath(FileNode &node, const QString &path)
+{
+    if (node.path == path) return &node;
+
+    for (FileNode &child : node.children) {
+        FileNode *found = findNodeByPath(child, path);
+        if (found) return found;
+    }
+
+    return nullptr;
+}
+
+void MainWindow::showPieChart(QTreeWidgetItem *item)
+{
+    QString itemPath = item->data(0, Qt::UserRole).toString();
+
+    // Find the corresponding FileNode
+    FileNode *node = findNodeByPath(rootNode, itemPath);
+
+    if (!node || !node->isFolder) {
+        QMessageBox::warning(this, "Pie Chart", "Please select a folder to view its pie chart.");
+        return;
+    }
+
+    if (node->children.isEmpty()) {
+        QMessageBox::information(this, "Pie Chart", "This folder has no children to display.");
+        return;
+    }
+
+    // Create pie series (without QtCharts:: prefix)
+    QPieSeries *series = new QPieSeries();
+
+    for (const FileNode &child : node->children) {
+        double percentage = (node->size > 0) ? (100.0 * child.size / node->size) : 0.0;
+        QPieSlice *slice = series->append(child.name, child.size);
+        slice->setLabel(QString("%1 (%2%)").arg(child.name).arg(percentage, 0, 'f', 2));
+    }
+
+    // Create chart (without QtCharts:: prefix)
+    QChart *chart = new QChart();
+    chart->addSeries(series);
+    chart->setTitle("Direct Children of: " + node->name);
+    chart->legend()->setAlignment(Qt::AlignRight);
+
+    // Create chart view (without QtCharts:: prefix)
+    QChartView *chartView = new QChartView(chart);
+    chartView->setRenderHint(QPainter::Antialiasing);
+
+    // Create dialog to show chart
+    QDialog *dialog = new QDialog(this);
+    dialog->setWindowTitle("Pie Chart - " + node->name);
+    dialog->resize(800, 600);
+
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    layout->addWidget(chartView);
+    dialog->setLayout(layout);
+
+    dialog->exec();
+}
+
+bool MainWindow::moveToRecycleBin(const QString &path)
+{
+#ifdef Q_OS_WIN
+    // Convert QString to wide string for Windows API
+    std::wstring wPath = path.toStdWString();
+
+    // Double null-terminated string required by SHFileOperation
+    std::vector<wchar_t> doubleNullTerminated(wPath.begin(), wPath.end());
+    doubleNullTerminated.push_back(L'\0');
+    doubleNullTerminated.push_back(L'\0');
+
+    SHFILEOPSTRUCTW fileOp = {};
+    fileOp.hwnd = nullptr;
+    fileOp.wFunc = FO_DELETE;
+    fileOp.pFrom = doubleNullTerminated.data();
+    fileOp.pTo = nullptr;
+    fileOp.fFlags = FOF_ALLOWUNDO | FOF_NO_UI;  // FOF_ALLOWUNDO sends to recycle bin
+    fileOp.fAnyOperationsAborted = FALSE;
+    fileOp.hNameMappings = nullptr;
+    fileOp.lpszProgressTitle = nullptr;
+
+    int result = SHFileOperationW(&fileOp);
+
+    return (result == 0);
+
+#elif defined(Q_OS_MAC)
+    // macOS: Move to Trash using NSFileManager
+    QProcess process;
+    process.start("osascript", QStringList()
+                                   << "-e"
+                                   << QString("tell application \"Finder\" to delete POSIX file \"%1\"").arg(path));
+    process.waitForFinished();
+    return (process.exitCode() == 0);
+
+#elif defined(Q_OS_LINUX)
+    // Linux: Move to Trash using gio trash command
+    QProcess process;
+    process.start("gio", QStringList() << "trash" << path);
+    process.waitForFinished();
+
+    if (process.exitCode() != 0) {
+        // Fallback: try trash-cli
+        process.start("trash-put", QStringList() << path);
+        process.waitForFinished();
+    }
+
+    return (process.exitCode() == 0);
+
+#else
+    // Unsupported platform - return false
+    return false;
+#endif
+}
+
+void MainWindow::deleteItem(QTreeWidgetItem *item)
+{
+    QString itemPath = item->data(0, Qt::UserRole).toString();
+    QString itemName = item->text(0);
+
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Delete Confirmation",
+                                  "Are you sure you want to delete:\n" + itemName +
+                                      "\n\nThe item will be moved to the Recycle Bin.",
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (reply != QMessageBox::Yes) return;
+
+    // Show progress bar
+    ui->progressBar->setValue(0);
+    ui->progressBar->setFormat("Deleting...");
+    QApplication::processEvents();
+
+    // Use the new moveToRecycleBin function
+    bool success = moveToRecycleBin(itemPath);
+
+    if (!success) {
+        ui->progressBar->setValue(0);
+        ui->progressBar->setFormat("0%");
+        QMessageBox::warning(this, "File in Use Warning",
+                             "This file cannot be deleted. It may be in use by another program or you may not have permission.");
+        return;
+    }
+
+    ui->progressBar->setValue(100);
+    ui->progressBar->setFormat("Delete Complete");
+    QApplication::processEvents();
+
+    QMessageBox::information(this, "Deletion Complete",
+                             "Item moved to Recycle Bin successfully. Rescanning directory...");
+
+    // Automatic rescan
+    onReScanClicked();
+}
+
+/*void MainWindow::deleteItem(QTreeWidgetItem *item)
+{
+    QString itemPath = item->data(0, Qt::UserRole).toString();
+    QString itemName = item->text(0);
+
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Delete Confirmation",
+                                  "Are you sure you want to delete:\n" + itemName + "?",
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (reply != QMessageBox::Yes) return;
+
+    // Show progress bar
+    ui->progressBar->setValue(0);
+    ui->progressBar->setFormat("Deleting...");
+    QApplication::processEvents();
+
+    QFileInfo fileInfo(itemPath);
+    bool success = false;
+
+    if (fileInfo.isDir()) {
+        QDir dir(itemPath);
+        success = dir.removeRecursively();
+    } else {
+        QFile file(itemPath);
+        success = file.remove();
+    }
+
+    if (!success) {
+        ui->progressBar->setValue(0);
+        ui->progressBar->setFormat("0%");
+        QMessageBox::warning(this, "File in Use Warning",
+                             "This file cannot be deleted. It may be in use by another program.");
+        return;
+    }
+
+    ui->progressBar->setValue(100);
+    ui->progressBar->setFormat("Delete Complete");
+    QApplication::processEvents();
+
+    QMessageBox::information(this, "Deletion Complete",
+                             "Item deleted successfully. Rescanning directory...");
+
+    // Automatic rescan
+    onReScanClicked();
+}
+*/
+
+void MainWindow::renameItem(QTreeWidgetItem *item)
+{
+    QString oldPath = item->data(0, Qt::UserRole).toString();
+    QString oldName = item->text(0);
+
+    bool ok;
+    QString newName = QInputDialog::getText(this, "Rename",
+                                            "Enter new name:",
+                                            QLineEdit::Normal,
+                                            oldName, &ok);
+
+    if (!ok || newName.isEmpty() || newName == oldName) return;
+
+    QFileInfo fileInfo(oldPath);
+    QString newPath = fileInfo.absolutePath() + "/" + newName;
+
+    // Check if file with same name exists
+    if (QFile::exists(newPath)) {
+        QMessageBox::warning(this, "Rename Error",
+                             "File by the same name already exists in this directory.");
+        return;
+    }
+
+    // Perform rename
+    bool success = QFile::rename(oldPath, newPath);
+
+    if (!success) {
+        QMessageBox::warning(this, "Rename Error",
+                             "Failed to rename the item. It may be in use or you may not have permission.");
+        return;
+    }
+
+    QMessageBox::information(this, "Rename Complete",
+                             "Item renamed successfully. Rescanning directory...");
+
+    // Automatic rescan
+    onReScanClicked();
 }

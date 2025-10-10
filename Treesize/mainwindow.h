@@ -5,6 +5,17 @@
 #include <QTreeWidget>
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QMenu>
+#include <QClipboard>
+#include <QApplication>
+#include <QtCharts/QPieSeries>
+#include <QtCharts/QChartView>
+#include <QtCharts/QChart>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 struct FileNode {
     QString name;
@@ -47,9 +58,12 @@ private:
     quint64 scannedItems = 0;  // progress count
     QElapsedTimer timer;       // track elapsed time
 
+    bool moveToRecycleBin(const QString &path);
     void countTotalItems(const QString &path); // helper
     QString currentDirPath;
     bool cancelScan = false; // track if the scan was canceled
+    FileNode* findNodeByPath(FileNode &node, const QString &path);
+    FileNode rootNode;  // Store the root node for later access
 
 
 private slots:
@@ -69,7 +83,11 @@ private slots:
     void exportAsPDF();
     void exportAsJSON();
     void exportAsCSV();
-
+    void onTreeItemCustomContextMenu(const QPoint &pos);
+    void showFullPath(QTreeWidgetItem *item);
+    void showPieChart(QTreeWidgetItem *item);
+    void deleteItem(QTreeWidgetItem *item);
+    void renameItem(QTreeWidgetItem *item);
 
 
 };
