@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "treemapwidget.h"
 #include <QDir>
 #include <QFileInfo>
 #include <QTreeWidgetItem>
@@ -27,6 +28,7 @@
 #include <QtCharts/QPieSlice>
 #include <QVBoxLayout>
 #include <QDialog>
+#include <functional>
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -35,9 +37,26 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
-    ui->progressBar->setValue(0);
-    ui->progressBar->setFormat("0%");
+    // Initialize TreeMap widget in right panel
+    treeMapWidget = new TreeMapWidget(ui->widget_3);
+    treeMapWidget->setVisible(false);
 
+    QVBoxLayout *rightLayout = new QVBoxLayout(ui->widget_3);
+    rightLayout->setContentsMargins(0,0,0,0);
+    rightLayout->addWidget(treeMapWidget);
+
+    // Graphical view toggle
+    connect(ui->pushButton_6, &QPushButton::clicked, [this]() {
+        graphicalViewEnabled = !graphicalViewEnabled;
+        treeMapWidget->setVisible(graphicalViewEnabled);
+        if (graphicalViewEnabled) {
+            treeMapWidget->setSourceTree(ui->treeWidget, 5);
+        } else {
+            treeMapWidget->clearSource();
+        }
+    });
+
+    // Button connections
     connect(ui->pushButton_2, &QPushButton::clicked, this, &MainWindow::onScanClicked);
     connect(ui->pushButton_7, &QPushButton::clicked, this, &MainWindow::onTextViewSettingsClicked);
     connect(ui->pushButton_4, &QPushButton::clicked, this, &MainWindow::onSearchClicked);
@@ -46,19 +65,21 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton_5, &QPushButton::clicked, this, &MainWindow::onCancelScanClicked);
     connect(ui->pushButton, &QPushButton::clicked, this, &MainWindow::onExportClicked);
 
+    // Initialize tree widget
     ui->labelCurrentDir->setText("Current Directory: —");
-
-
-    // Initialize TreeWidget only (no scan yet)
     ui->treeWidget->setColumnCount(5);
     QStringList headers = {"Name", "Size", "% of Parent", "Last Modified", "File Count"};
     ui->treeWidget->setHeaderLabels(headers);
     ui->treeWidget->setSortingEnabled(true);
-    ui->treeWidget->sortByColumn(0, Qt::AscendingOrder); // optional: default sort by Name
-
+    ui->treeWidget->sortByColumn(0, Qt::AscendingOrder);
     ui->treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+
     connect(ui->treeWidget, &QTreeWidget::customContextMenuRequested,
             this, &MainWindow::onTreeItemCustomContextMenu);
+
+    // Initialize progress bar
+    ui->progressBar->setValue(0);
+    ui->progressBar->setFormat("0%");
 }
 
 MainWindow::~MainWindow()
@@ -202,6 +223,10 @@ void MainWindow::onScanClicked()
     // Set progress to 100% at the end
     ui->progressBar->setValue(100);
     ui->progressBar->setFormat("100% (Done)");
+
+    // Update graphical view if it's visible (reuse tree widget; no rescan)
+    if (graphicalViewEnabled)
+        treeMapWidget->setSourceTree(ui->treeWidget, 5);
 }
 
 

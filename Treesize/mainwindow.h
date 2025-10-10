@@ -11,12 +11,14 @@
 #include <QtCharts/QPieSeries>
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
+#include "filenode.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
 #endif
 
+/*
 struct FileNode {
     QString name;
     QString path;
@@ -27,10 +29,14 @@ struct FileNode {
     QDateTime lastModified;
 
 };
+*/
+
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
+
+class TreeMapWidget;  // forward declaration
 
 class MainWindow : public QMainWindow
 {
@@ -64,6 +70,8 @@ private:
     bool cancelScan = false; // track if the scan was canceled
     FileNode* findNodeByPath(FileNode &node, const QString &path);
     FileNode rootNode;  // Store the root node for later access
+    TreeMapWidget *treeMapWidget;       // pointer to your custom widget
+    bool graphicalViewEnabled;
 
 
 private slots:
