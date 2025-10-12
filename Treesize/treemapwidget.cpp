@@ -1,5 +1,3 @@
-//treemapwidget.cpp
-
 #include "treemapwidget.h"
 #include <QPainter>
 #include <QDebug>
@@ -8,24 +6,53 @@
 #include <QFontMetrics>
 #include <numeric>
 #include <limits>
+#include <QFont>
+#include <QToolTip>
+#include <QMouseEvent>
+#include <QStringList>
+
+// ---------------------- Constructor / Setup ----------------------
 
 TreeMapWidget::TreeMapWidget(QWidget *parent) : QWidget(parent)
 {
     setMinimumSize(240, 180);
+    // enable hover detection
+    setMouseTracking(true);
 }
+
+// ---------------------- Public API ----------------------
 
 void TreeMapWidget::setSourceTree(QTreeWidget *tree, int maxDepth)
 {
     m_tree = tree;
     m_maxDepth = maxDepth;
+    // Clear any current root (we will default to top-level)
+    m_currentRoot = nullptr;
     update();
 }
 
 void TreeMapWidget::clearSource()
 {
     m_tree = nullptr;
+    m_currentRoot = nullptr;
     update();
 }
+
+void TreeMapWidget::setCurrentRoot(QTreeWidgetItem *item)
+{
+    m_currentRoot = item;
+    update();
+    emit rootChanged(m_currentRoot);
+}
+
+void TreeMapWidget::clearCurrentRoot()
+{
+    m_currentRoot = nullptr;
+    update();
+    emit rootChanged(nullptr);
+}
+
+// ---------------------- Helpers ----------------------
 
 quint64 TreeMapWidget::itemRawSize(QTreeWidgetItem *item) const
 {
@@ -33,16 +60,26 @@ quint64 TreeMapWidget::itemRawSize(QTreeWidgetItem *item) const
     QVariant v = item->data(1, Qt::UserRole);
     if (v.isValid()) {
         bool ok = false;
+        // if stored as number string in userrole
         quint64 val = v.toString().toULongLong(&ok);
         if (ok) return val;
     }
-    // fallback parse
+    // fallback parse from visible text column 1
     QString text = item->text(1).trimmed();
     QString numberPart = text.split(' ').first().replace(",", "");
     bool ok = false;
     quint64 fallback = numberPart.toULongLong(&ok);
     if (ok) return fallback;
     return 0;
+}
+
+QString TreeMapWidget::humanReadableSize(quint64 bytes) const
+{
+    double val = double(bytes);
+    const char *units[] = {"B", "KB", "MB", "GB", "TB"};
+    int unit = 0;
+    while (val >= 1024.0 && unit < 4) { val /= 1024.0; ++unit; }
+    return QString::number(val, 'f', (unit==0?0:2)) + " " + units[unit];
 }
 
 int TreeMapWidget::allowedChildrenForDepth(int depth) const
@@ -58,6 +95,19 @@ bool TreeMapWidget::passesRootVisibility(QTreeWidgetItem *item, quint64 absolute
     double pct = (100.0 * double(itemRawSize(item))) / double(absoluteRootSize);
     return pct >= m_minRootPercent;
 }
+
+int TreeMapWidget::getItemDepth(QTreeWidgetItem *item) const
+{
+    int d = 0;
+    QTreeWidgetItem *p = item;
+    while (p && p->parent()) {
+        ++d;
+        p = p->parent();
+    }
+    return d;
+}
+
+// ---------------------- Children building & clubbing ----------------------
 
 std::vector<TreeMapWidget::ChildDesc> TreeMapWidget::buildFilteredChildren(QTreeWidgetItem *parent, quint64 absoluteRootSize) const
 {
@@ -89,13 +139,14 @@ std::vector<TreeMapWidget::ChildDesc> TreeMapWidget::buildFilteredChildren(QTree
 void TreeMapWidget::applyDepthClubbing(std::vector<ChildDesc> &children, int maxVisible) const
 {
     if (maxVisible <= 0) {
-        // show none as direct children -> club all into one
+        // club all into one node
+        int count = children.size();
         quint64 total = 0;
         for (auto &c : children) total += c.size;
         children.clear();
         if (total > 0) {
             ChildDesc club;
-            club.name = QString("➕ [%1 Files/Folders]").arg(0); // we'll set count below
+            club.name = QString("➕ [%1 Files/Folders]").arg(count);
             club.size = total;
             club.ptr = nullptr;
             club.isVirtual = true;
@@ -126,12 +177,7 @@ void TreeMapWidget::applyDepthClubbing(std::vector<ChildDesc> &children, int max
     children.swap(keptList);
 }
 
-/* -------------------------
-   Squarified treemap utils
-   Adapted simplified squarify algorithm:
-   - sizes must be non-negative
-   - returns a rectangle per size in same order as sizes
-   ------------------------- */
+// ---------------------- Squarified treemap ----------------------
 
 static double worstRatio(const std::vector<double> &row, double side) {
     if (row.empty() || side <= 0) return std::numeric_limits<double>::infinity();
@@ -139,6 +185,7 @@ static double worstRatio(const std::vector<double> &row, double side) {
     for (double v : row) sum += v;
     double maxv = 0, minv = std::numeric_limits<double>::infinity();
     for (double v : row) { maxv = std::max(maxv, v); minv = std::min(minv, v); }
+    if (minv <= 0 || sum <= 0) return std::numeric_limits<double>::infinity();
     double s2 = side * side;
     double r1 = (s2 * maxv) / (sum * sum);
     double r2 = (sum * sum) / (s2 * minv);
@@ -148,7 +195,6 @@ static double worstRatio(const std::vector<double> &row, double side) {
 std::vector<QRectF> TreeMapWidget::squarifyLayout(const std::vector<quint64> &sizes, const QRectF &rect) const
 {
     std::vector<QRectF> result;
-    result.reserve(sizes.size());
     // handle trivial cases
     quint64 total = 0;
     for (auto v : sizes) total += v;
@@ -158,13 +204,14 @@ std::vector<QRectF> TreeMapWidget::squarifyLayout(const std::vector<quint64> &si
         return result;
     }
 
-    // We'll implement a simple squarify using a working list of remaining rectangles
-    // Maintain order: we will map sizes to rectangles in the same order as input
+    // normalized fractions
     std::vector<double> normalized;
     normalized.reserve(sizes.size());
     for (auto v : sizes) normalized.push_back(double(v) / double(total));
 
-    // We'll maintain an index pointer into normalized
+    // initialize result with placeholder rects of correct size
+    result.assign(normalized.size(), QRectF(0,0,0,0));
+
     int idx = 0;
     QRectF avail = rect;
     std::vector<double> row;
@@ -201,7 +248,8 @@ std::vector<QRectF> TreeMapWidget::squarifyLayout(const std::vector<quint64> &si
                 for (size_t k = 0; k < row.size(); ++k) {
                     double w = (row[k] / rowSum) * avail.width();
                     QRectF rrect(x, avail.top(), w, rowHeight);
-                    result.push_back(rrect);
+                    // place into result at original index
+                    result[rowIdx[k]] = rrect;
                     x += w;
                 }
                 // shrink avail
@@ -213,7 +261,7 @@ std::vector<QRectF> TreeMapWidget::squarifyLayout(const std::vector<quint64> &si
                 for (size_t k = 0; k < row.size(); ++k) {
                     double h = (row[k] / rowSum) * avail.height();
                     QRectF rrect(avail.left(), y, rowWidth, h);
-                    result.push_back(rrect);
+                    result[rowIdx[k]] = rrect;
                     y += h;
                 }
                 avail = QRectF(avail.left() + rowWidth, avail.top(), avail.width() - rowWidth, avail.height());
@@ -226,28 +274,28 @@ std::vector<QRectF> TreeMapWidget::squarifyLayout(const std::vector<quint64> &si
         ++idx;
     }
 
-    // result now has rectangles but in the order of assignment (which follows original order)
-    // However because we committed rows in sequence, result size should equal input size
-    // If slightly mismatched, pad with zero rects
-    if ((int)result.size() != (int)sizes.size()) {
-        // attempt to adjust: if fewer, append small rects using remaining avail area
-        while ((int)result.size() < (int)sizes.size()) result.push_back(QRectF(0,0,0,0));
-    }
     return result;
 }
 
-/* -------------------------
-   Drawing
-   ------------------------- */
+// ---------------------- Drawing ----------------------
 
 void TreeMapWidget::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
     painter.fillRect(rect(), palette().window());
 
+    // clear rectangle->item map before painting
+    m_rectMap.clear();
+    m_hoveredItem = nullptr; // will be set on mouse move
+
     if (!m_tree || m_tree->topLevelItemCount() == 0) return;
-    QTreeWidgetItem *rootItem = m_tree->topLevelItem(0);
+
+    QTreeWidgetItem *rootItem = nullptr;
+    if (m_currentRoot) rootItem = m_currentRoot;
+    else rootItem = m_tree->topLevelItem(0);
+
     if (!rootItem) return;
 
     quint64 absoluteRootSize = itemRawSize(rootItem);
@@ -258,20 +306,24 @@ void TreeMapWidget::paintEvent(QPaintEvent *)
     }
 
     // Reserve legend space at bottom
-    const qreal legendHeight = 44.0;
+    const qreal legendHeight = 36.0;
     QRectF mainRect = QRectF(0, 0, width(), height() - legendHeight).adjusted(m_margin, m_margin, -m_margin, -m_margin);
 
     drawItem(painter, mainRect, rootItem, 0, absoluteRootSize);
 
-    QRectF legendRect(0, height() - legendHeight - 4, width(), legendHeight);
+    QRectF legendRect(0, height() - legendHeight, width(), legendHeight);
     drawLegend(painter, legendRect);
 }
 
 void TreeMapWidget::drawVirtualItem(QPainter &painter, const QRectF &rect, const ChildDesc &virtualChild,
                                     QTreeWidgetItem *parentItem)
 {
-    // draw box
-    QColor color = m_depthColors[ std::min(4, 1) ]; // color choice will be handled in caller (depth+1), simplified here
+    // choose color based on parent depth (if available), else level 1
+    int depth = 1;
+    if (parentItem) depth = getItemDepth(parentItem) + 1;
+    depth = std::min(depth, 4);
+
+    QColor color = m_depthColors[ depth ];
     painter.setBrush(color);
     QPen pen(m_borderColor);
     pen.setWidthF(1.0);
@@ -279,7 +331,10 @@ void TreeMapWidget::drawVirtualItem(QPainter &painter, const QRectF &rect, const
     QRectF outer = rect.adjusted(0.5, 0.5, -0.5, -0.5);
     painter.drawRect(outer);
 
-    // label only if fits
+    // record mapping for hit-detection: virtual nodes map to nullptr so clicks don't change the root
+    m_rectMap.append(qMakePair(outer, (QTreeWidgetItem*)nullptr));
+
+    // label: name + percentage of parent
     QFontMetrics fm(painter.font());
     QString percent = "0.0%";
     if (parentItem) {
@@ -289,9 +344,25 @@ void TreeMapWidget::drawVirtualItem(QPainter &painter, const QRectF &rect, const
     QString label = QString("%1 (%2)").arg(virtualChild.name).arg(percent);
 
     int availW = int(outer.width() - 8);
-    if (availW > 10 && fm.horizontalAdvance(label) <= availW) {
-        painter.setPen(Qt::black);
-        painter.drawText(outer.adjusted(4,2,-4,-2), Qt::AlignLeft | Qt::AlignTop, label);
+    if (availW > 10) {
+        // if full label fits, draw; else draw elided if at least half fits
+        int fullW = fm.horizontalAdvance(label);
+        QString displayLabel;
+        if (fullW <= availW) {
+            displayLabel = label;
+        } else {
+            // require at least half of the full width to show a truncated label
+            if (availW >= fullW / 2) {
+                displayLabel = fm.elidedText(label, Qt::ElideRight, availW);
+            } else {
+                displayLabel.clear();
+            }
+        }
+
+        if (!displayLabel.isEmpty()) {
+            painter.setPen(Qt::black);
+            painter.drawText(outer.adjusted(4,2,-4,-2), Qt::AlignLeft | Qt::AlignTop, displayLabel);
+        }
     }
 }
 
@@ -313,6 +384,9 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
     QRectF outer = rect.adjusted(0.5, 0.5, -0.5, -0.5);
     painter.drawRect(outer);
 
+    // record mapping for hit-detection - clickable only if ptr non-null (we store item pointer)
+    m_rectMap.append(qMakePair(outer, item));
+
     // prepare font and metrics (use default app font)
     painter.setFont(QFont());
     QFontMetrics fm(painter.font());
@@ -325,20 +399,35 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
         quint64 psize = itemRawSize(p);
         if (psize > 0) percentOfParent = 100.0 * double(itemRawSize(item)) / double(psize);
     }
-    QString label = QString("%1%2 (%.1f%)").arg(prefix).arg(item->text(0)).arg(percentOfParent);
+    // fixed percent formatting
+    QString label = QString("%1%2 (%3%)")
+                        .arg(prefix)
+                        .arg(item->text(0))
+                        .arg(percentOfParent, 0, 'f', 1);
 
-    // only draw label if it fits in top area (adaptive label suppression)
+    // only draw label if it fits in top area (adaptive label suppression with elide)
     qreal labelPadding = 6.0;
     qreal availLabelWidth = outer.width() - 2.0 * labelPadding;
     int availW = int(std::max(0.0, availLabelWidth - 4.0));
-    bool labelFits = (availW > 8) && (fm.horizontalAdvance(label) <= availW);
+    int labelWidth = fm.horizontalAdvance(label);
 
-    if (labelFits) {
-        QRectF labelRect(outer.left() + labelPadding, outer.top() + 4.0, availLabelWidth, fm.height() + 4.0);
-        painter.setPen(Qt::black);
-        painter.drawText(labelRect, Qt::AlignLeft | Qt::AlignVCenter, label);
+    if (availW > 8) {
+        QString displayLabel = label;
+        if (labelWidth > availW) {
+            // show truncated text with ellipsis if at least half fits
+            if (availW >= labelWidth / 2) {
+                displayLabel = fm.elidedText(label, Qt::ElideRight, availW);
+            } else {
+                displayLabel.clear(); // too small even for ellipsis
+            }
+        }
+
+        if (!displayLabel.isEmpty()) {
+            QRectF labelRect(outer.left() + labelPadding, outer.top() + 4.0, availLabelWidth, fm.height() + 4.0);
+            painter.setPen(Qt::black);
+            painter.drawText(labelRect, Qt::AlignLeft | Qt::AlignVCenter, displayLabel);
+        }
     }
-    // If label doesn't fit, we intentionally suppress it to avoid clutter (as requested).
 
     // Stop recursion if depth limit or no children
     if (depth >= m_maxDepth || item->childCount() == 0) return;
@@ -357,7 +446,9 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
     for (auto &c : children) sizes.push_back(c.size ? c.size : 1); // avoid zeros
 
     // compute area inside outer reserved for children (leave space at top for label if drawn)
-    qreal topSpace = (labelFits ? (fm.height() + 10.0) : 6.0);
+    qreal topSpace = (/* if some label displayed? */ (fm.horizontalAdvance(label) <= availW) ? (fm.height() + 10.0) : 6.0);
+    // Note: we used a simpler heuristic: if the full label fits we reserve the larger top space,
+    // otherwise reserve a small top margin. This keeps children area sensible when label is elided.
     QRectF childrenArea(outer.left() + 4.0,
                         outer.top() + topSpace,
                         outer.width() - 8.0,
@@ -386,30 +477,111 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
 
 void TreeMapWidget::drawLegend(QPainter &painter, const QRectF &rect)
 {
-    // outer border
-    QPen borderPen(Qt::gray);
-    borderPen.setWidthF(1.0);
-    painter.setPen(borderPen);
+    // outer border covers full width (use a thin border)
+    painter.setPen(QPen(Qt::gray, 1.0));
     painter.setBrush(Qt::NoBrush);
-    painter.drawRect(rect.adjusted(1,1,-1,-1));
+    painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5));
 
-    // draw 5 boxes with labels
+    // Divide into 5 equal inner boxes
+    int levels = 5;
+    qreal sectionWidth = rect.width() / levels;
+    qreal y = rect.top();
+    qreal h = rect.height();
+
     QFontMetrics fm(painter.font());
-    qreal boxSize = 16.0;
-    qreal spacing = 12.0;
-    qreal labelWidth = 70.0;
-    qreal x = rect.left() + 12.0;
-    qreal y = rect.center().y() - boxSize/2.0;
 
-    for (int lvl = 0; lvl < 5; ++lvl) {
-        painter.setBrush(m_depthColors[lvl]);
+    for (int i = 0; i < levels; ++i) {
+        QRectF section(rect.left() + i * sectionWidth, y, sectionWidth, h);
+
+        painter.setBrush(m_depthColors[i]);
         painter.setPen(Qt::NoPen);
-        painter.drawRect(QRectF(x, y, boxSize, boxSize));
+        painter.drawRect(section);
 
         painter.setPen(Qt::black);
-        QRectF textRect(x + boxSize + 6.0, y, labelWidth, boxSize);
-        painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, QString("Level %1").arg(lvl));
-
-        x += boxSize + 6.0 + labelWidth + spacing;
+        QString text = QString("Level %1").arg(i);
+        painter.drawText(section, Qt::AlignCenter, text);
     }
+}
+
+// ---------------------- Interaction: hit-detection & tooltips ----------------------
+
+void TreeMapWidget::mousePressEvent(QMouseEvent *event)
+{
+    if (!m_tree) return;
+
+    QPointF pos = event->pos();
+    // iterate from end so we find top-most rectangles drawn last (children over parents)
+    for (int i = m_rectMap.size() - 1; i >= 0; --i) {
+        const QRectF &r = m_rectMap[i].first;
+        QTreeWidgetItem *it = m_rectMap[i].second;
+        if (r.contains(pos)) {
+            // only respond if it's a real item (not virtual club node)
+            if (it) {
+                // change current root (no rescanning)
+                m_currentRoot = it;
+                update();
+                emit rootChanged(m_currentRoot);
+            }
+            return;
+        }
+    }
+    // if click outside any rectangle, do nothing
+    QWidget::mousePressEvent(event);
+}
+
+void TreeMapWidget::mouseMoveEvent(QMouseEvent *event)
+{
+    if (!m_tree) {
+        QWidget::mouseMoveEvent(event);
+        return;
+    }
+
+    QPointF pos = event->pos();
+    QTreeWidgetItem *found = nullptr;
+    // iterate reverse so top-most rectangles get priority
+    for (int i = m_rectMap.size() - 1; i >= 0; --i) {
+        const QRectF &r = m_rectMap[i].first;
+        QTreeWidgetItem *it = m_rectMap[i].second;
+        if (r.contains(pos)) {
+            found = it; // may be nullptr for virtual club nodes
+            break;
+        }
+    }
+
+    // if hovered changed, update tooltip
+    if (found != m_hoveredItem) {
+        m_hoveredItem = found;
+        if (m_hoveredItem) {
+            // build tooltip text from available QTreeWidgetItem data
+            QString name = m_hoveredItem->text(0);
+            quint64 size = itemRawSize(m_hoveredItem);
+            QString sizeStr = humanReadableSize(size);
+
+            // attempt percentage of parent
+            QString pctStr = "100%";
+            QTreeWidgetItem *p = m_hoveredItem->parent();
+            if (p) {
+                quint64 psize = itemRawSize(p);
+                if (psize > 0) pctStr = QString::number(100.0 * double(size) / double(psize), 'f', 1) + "%";
+            }
+
+            // try to pick last-modified info from column 2 if present, else from userrole
+            QString modified = "Unknown";
+            QVariant mv = m_hoveredItem->data(2, Qt::UserRole);
+            if (mv.isValid()) modified = mv.toString();
+            else if (!m_hoveredItem->text(2).isEmpty()) modified = m_hoveredItem->text(2);
+
+            QString tooltip = QString("%1\nSize: %2\n%3 of parent\nModified: %4")
+                                  .arg(name)
+                                  .arg(sizeStr)
+                                  .arg(pctStr)
+                                  .arg(modified);
+            QToolTip::showText(event->globalPos(), tooltip, this);
+        } else {
+            // hovered over empty or a virtual node (nullptr) -> hide tooltip
+            QToolTip::hideText();
+        }
+    }
+
+    QWidget::mouseMoveEvent(event);
 }
