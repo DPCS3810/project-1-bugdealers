@@ -10,6 +10,8 @@
 #include <QToolTip>
 #include <QMouseEvent>
 #include <QStringList>
+#include <QMenu>
+#include <QAction>
 
 // ---------------------- Constructor / Setup ----------------------
 
@@ -142,7 +144,11 @@ void TreeMapWidget::applyDepthClubbing(std::vector<ChildDesc> &children, int max
         // club all into one node
         int count = children.size();
         quint64 total = 0;
-        for (auto &c : children) total += c.size;
+        QVector<QTreeWidgetItem*> clubbed;  // **NEW: collect clubbed items**
+        for (auto &c : children) {
+            total += c.size;
+            if (c.ptr) clubbed.append(c.ptr);  // **NEW: store pointer**
+        }
         children.clear();
         if (total > 0) {
             ChildDesc club;
@@ -150,6 +156,7 @@ void TreeMapWidget::applyDepthClubbing(std::vector<ChildDesc> &children, int max
             club.size = total;
             club.ptr = nullptr;
             club.isVirtual = true;
+            club.clubbedItems = clubbed;  // **NEW: attach clubbed items**
             children.push_back(club);
         }
         return;
@@ -160,7 +167,11 @@ void TreeMapWidget::applyDepthClubbing(std::vector<ChildDesc> &children, int max
     // compute others sum for beyond maxVisible
     int totalChildren = (int)children.size();
     quint64 othersSum = 0;
-    for (int i = maxVisible; i < totalChildren; ++i) othersSum += children[i].size;
+    QVector<QTreeWidgetItem*> clubbed;  // **NEW: collect clubbed items**
+    for (int i = maxVisible; i < totalChildren; ++i) {
+        othersSum += children[i].size;
+        if (children[i].ptr) clubbed.append(children[i].ptr);  // **NEW: store pointer**
+    }
 
     // keep top maxVisible and append virtual node
     int kept = maxVisible;
@@ -172,6 +183,7 @@ void TreeMapWidget::applyDepthClubbing(std::vector<ChildDesc> &children, int max
     club.size = othersSum;
     club.ptr = nullptr;
     club.isVirtual = true;
+    club.clubbedItems = clubbed;  // **NEW: attach clubbed items**
     keptList.push_back(club);
 
     children.swap(keptList);
@@ -331,8 +343,12 @@ void TreeMapWidget::drawVirtualItem(QPainter &painter, const QRectF &rect, const
     QRectF outer = rect.adjusted(0.5, 0.5, -0.5, -0.5);
     painter.drawRect(outer);
 
-    // record mapping for hit-detection: virtual nodes map to nullptr so clicks don't change the root
-    m_rectMap.append(qMakePair(outer, (QTreeWidgetItem*)nullptr));
+    // **CHANGED: record mapping with clubbed items for click handling**
+    RectMapEntry entry;
+    entry.rect = outer;
+    entry.item = nullptr;  // virtual node
+    entry.clubbedItems = virtualChild.clubbedItems;
+    m_rectMap.append(entry);
 
     // label: name + percentage of parent
     QFontMetrics fm(painter.font());
@@ -345,15 +361,27 @@ void TreeMapWidget::drawVirtualItem(QPainter &painter, const QRectF &rect, const
 
     int availW = int(outer.width() - 8);
     if (availW > 10) {
-        // if full label fits, draw; else draw elided if at least half fits
+        // **CHANGED: ensure minimum 3 characters shown**
         int fullW = fm.horizontalAdvance(label);
         QString displayLabel;
         if (fullW <= availW) {
             displayLabel = label;
         } else {
-            // require at least half of the full width to show a truncated label
-            if (availW >= fullW / 2) {
+            // ensure at least 3 characters are shown if possible
+            int minW = fm.horizontalAdvance("...");  // width of ellipsis
+            int threeCharW = 0;
+            if (label.length() >= 3) {
+                threeCharW = fm.horizontalAdvance(label.left(3)) + minW;
+            }
+
+            if (availW >= threeCharW && label.length() >= 3) {
                 displayLabel = fm.elidedText(label, Qt::ElideRight, availW);
+                // ensure we have at least 3 visible characters before ellipsis
+                if (displayLabel.length() < 6) {  // "abc..." = 6 chars minimum
+                    displayLabel = label.left(3) + "...";
+                }
+            } else if (availW >= minW) {
+                displayLabel = "...";
             } else {
                 displayLabel.clear();
             }
@@ -384,8 +412,12 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
     QRectF outer = rect.adjusted(0.5, 0.5, -0.5, -0.5);
     painter.drawRect(outer);
 
-    // record mapping for hit-detection - clickable only if ptr non-null (we store item pointer)
-    m_rectMap.append(qMakePair(outer, item));
+    // **CHANGED: record mapping for hit-detection**
+    RectMapEntry entry;
+    entry.rect = outer;
+    entry.item = item;
+    entry.clubbedItems.clear();  // no clubbed items for regular nodes
+    m_rectMap.append(entry);
 
     // prepare font and metrics (use default app font)
     painter.setFont(QFont());
@@ -405,7 +437,7 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
                         .arg(item->text(0))
                         .arg(percentOfParent, 0, 'f', 1);
 
-    // only draw label if it fits in top area (adaptive label suppression with elide)
+    // **CHANGED: ensure minimum 3 characters shown (excluding prefix and percentage)**
     qreal labelPadding = 6.0;
     qreal availLabelWidth = outer.width() - 2.0 * labelPadding;
     int availW = int(std::max(0.0, availLabelWidth - 4.0));
@@ -414,11 +446,33 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
     if (availW > 8) {
         QString displayLabel = label;
         if (labelWidth > availW) {
-            // show truncated text with ellipsis if at least half fits
-            if (availW >= labelWidth / 2) {
+            // ensure at least 3 characters from the name are shown if possible
+            int minW = fm.horizontalAdvance("...");
+            QString itemName = item->text(0);
+            int threeCharW = 0;
+
+            if (itemName.length() >= 3) {
+                QString testLabel = prefix + itemName.left(3) + "...";
+                threeCharW = fm.horizontalAdvance(testLabel);
+            }
+
+            if (availW >= threeCharW && itemName.length() >= 3) {
                 displayLabel = fm.elidedText(label, Qt::ElideRight, availW);
+                // verify we have at least 3 chars from name visible
+                QString nameOnly = displayLabel;
+                nameOnly.remove(prefix);
+                int percentIdx = nameOnly.indexOf('(');
+                if (percentIdx > 0) {
+                    nameOnly = nameOnly.left(percentIdx).trimmed();
+                }
+                if (nameOnly.length() < 3 && itemName.length() >= 3) {
+                    // force at least 3 characters
+                    displayLabel = prefix + itemName.left(3) + "...";
+                }
+            } else if (availW >= minW) {
+                displayLabel = "...";
             } else {
-                displayLabel.clear(); // too small even for ellipsis
+                displayLabel.clear();
             }
         }
 
@@ -447,8 +501,6 @@ void TreeMapWidget::drawItem(QPainter &painter, const QRectF &rect, QTreeWidgetI
 
     // compute area inside outer reserved for children (leave space at top for label if drawn)
     qreal topSpace = (/* if some label displayed? */ (fm.horizontalAdvance(label) <= availW) ? (fm.height() + 10.0) : 6.0);
-    // Note: we used a simpler heuristic: if the full label fits we reserve the larger top space,
-    // otherwise reserve a small top margin. This keeps children area sensible when label is elided.
     QRectF childrenArea(outer.left() + 4.0,
                         outer.top() + topSpace,
                         outer.width() - 8.0,
@@ -503,85 +555,119 @@ void TreeMapWidget::drawLegend(QPainter &painter, const QRectF &rect)
     }
 }
 
-// ---------------------- Interaction: hit-detection & tooltips ----------------------
+// ---------------------- Interaction: Clubbed items menu ----------------------
+
+void TreeMapWidget::showClubbedItemsMenu(const QVector<QTreeWidgetItem*> &items, const QPoint &globalPos)
+{
+    if (items.isEmpty()) return;
+
+    QMenu menu(this);
+    menu.setTitle("Select Item to Navigate");
+
+    // Sort items by size (descending) for better UX
+    QVector<QTreeWidgetItem*> sortedItems = items;
+    std::sort(sortedItems.begin(), sortedItems.end(), [this](QTreeWidgetItem *a, QTreeWidgetItem *b) {
+        return itemRawSize(a) > itemRawSize(b);
+    });
+
+    // Add each clubbed item as a menu action
+    for (QTreeWidgetItem *item : sortedItems) {
+        QString name = item->text(0);
+        quint64 size = itemRawSize(item);
+        QString sizeStr = humanReadableSize(size);
+
+        QString itemLabel = QString("%1 (%2)").arg(name).arg(sizeStr);
+        QAction *action = menu.addAction(itemLabel);
+
+        // Connect to lambda that sets this item as the current root
+        connect(action, &QAction::triggered, [this, item]() {
+            m_currentRoot = item;
+            update();
+            emit rootChanged(m_currentRoot);
+        });
+    }
+
+    menu.exec(globalPos);
+}
+
 
 void TreeMapWidget::mousePressEvent(QMouseEvent *event)
-{
-    if (!m_tree) return;
+    {
+        if (!m_tree) return;
 
-    QPointF pos = event->pos();
-    // iterate from end so we find top-most rectangles drawn last (children over parents)
-    for (int i = m_rectMap.size() - 1; i >= 0; --i) {
-        const QRectF &r = m_rectMap[i].first;
-        QTreeWidgetItem *it = m_rectMap[i].second;
-        if (r.contains(pos)) {
-            // only respond if it's a real item (not virtual club node)
-            if (it) {
-                // change current root (no rescanning)
-                m_currentRoot = it;
-                update();
-                emit rootChanged(m_currentRoot);
+        QPointF pos = event->pos();
+        // iterate from end so we find top-most rectangles drawn last (children over parents)
+        for (int i = m_rectMap.size() - 1; i >= 0; --i) {
+            const RectMapEntry &entry = m_rectMap[i];
+            if (entry.rect.contains(pos)) {
+                if (entry.item) {
+                    // regular item - change current root
+                    m_currentRoot = entry.item;
+                    update();
+                    emit rootChanged(m_currentRoot);
+                } else if (!entry.clubbedItems.isEmpty()) {
+                    // **NEW: clubbed virtual node - show menu of clubbed items**
+                    showClubbedItemsMenu(entry.clubbedItems, event->globalPosition().toPoint());
+                }
+                return;
             }
-            return;
         }
+        // if click outside any rectangle, do nothing
+        QWidget::mousePressEvent(event);
     }
-    // if click outside any rectangle, do nothing
-    QWidget::mousePressEvent(event);
-}
 
 void TreeMapWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (!m_tree) {
-        QWidget::mouseMoveEvent(event);
-        return;
-    }
-
-    QPointF pos = event->pos();
-    QTreeWidgetItem *found = nullptr;
-    // iterate reverse so top-most rectangles get priority
-    for (int i = m_rectMap.size() - 1; i >= 0; --i) {
-        const QRectF &r = m_rectMap[i].first;
-        QTreeWidgetItem *it = m_rectMap[i].second;
-        if (r.contains(pos)) {
-            found = it; // may be nullptr for virtual club nodes
-            break;
+        if (!m_tree) {
+            QWidget::mouseMoveEvent(event);
+            return;
         }
-    }
 
-    // if hovered changed, update tooltip
-    if (found != m_hoveredItem) {
-        m_hoveredItem = found;
-        if (m_hoveredItem) {
-            // build tooltip text from available QTreeWidgetItem data
-            QString name = m_hoveredItem->text(0);
-            quint64 size = itemRawSize(m_hoveredItem);
-            QString sizeStr = humanReadableSize(size);
-
-            // attempt percentage of parent
-            QString pctStr = "100%";
-            QTreeWidgetItem *p = m_hoveredItem->parent();
-            if (p) {
-                quint64 psize = itemRawSize(p);
-                if (psize > 0) pctStr = QString::number(100.0 * double(size) / double(psize), 'f', 1) + "%";
+        QPointF pos = event->pos();
+        QTreeWidgetItem *found = nullptr;
+        // iterate reverse so top-most rectangles get priority
+        for (int i = m_rectMap.size() - 1; i >= 0; --i) {
+            const RectMapEntry &entry = m_rectMap[i];
+            if (entry.rect.contains(pos)) {
+                found = entry.item; // may be nullptr for virtual club nodes
+                break;
             }
-
-            // try to pick last-modified info from column 2 if present, else from userrole
-            QString modified = "Unknown";
-            QVariant mv = m_hoveredItem->data(2, Qt::UserRole);
-            if (mv.isValid()) modified = mv.toString();
-            else if (!m_hoveredItem->text(2).isEmpty()) modified = m_hoveredItem->text(2);
-
-            QString tooltip = QString("%1\nSize: %2\n%3 of parent\nModified: %4")
-                                  .arg(name)
-                                  .arg(sizeStr)
-                                  .arg(pctStr)
-                                  .arg(modified);
-            QToolTip::showText(event->globalPos(), tooltip, this);
-        } else {
-            // hovered over empty or a virtual node (nullptr) -> hide tooltip
-            QToolTip::hideText();
         }
-    }
 
-    QWidget::mouseMoveEvent(event);
+        // if hovered changed, update tooltip
+        if (found != m_hoveredItem) {
+            m_hoveredItem = found;
+            if (m_hoveredItem) {
+                // build tooltip text from available QTreeWidgetItem data
+                QString name = m_hoveredItem->text(0);
+                quint64 size = itemRawSize(m_hoveredItem);
+                QString sizeStr = humanReadableSize(size);
+
+                // attempt percentage of parent
+                QString pctStr = "100%";
+                QTreeWidgetItem *p = m_hoveredItem->parent();
+                if (p) {
+                    quint64 psize = itemRawSize(p);
+                    if (psize > 0) pctStr = QString::number(100.0 * double(size) / double(psize), 'f', 1) + "%";
+                }
+
+                // try to pick last-modified info from column 2 if present, else from userrole
+                QString modified = "Unknown";
+                QVariant mv = m_hoveredItem->data(2, Qt::UserRole);
+                if (mv.isValid()) modified = mv.toString();
+                else if (!m_hoveredItem->text(2).isEmpty()) modified = m_hoveredItem->text(2);
+
+                QString tooltip = QString("%1\nSize: %2\n%3 of parent\nModified: %4")
+                                      .arg(name)
+                                      .arg(sizeStr)
+                                      .arg(pctStr)
+                                      .arg(modified);
+                QToolTip::showText(event->globalPosition().toPoint(), tooltip, this);
+            } else {
+                // hovered over empty or a virtual node (nullptr) -> hide tooltip
+                QToolTip::hideText();
+            }
+        }
+
+        QWidget::mouseMoveEvent(event);
 }
