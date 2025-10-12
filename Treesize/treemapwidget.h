@@ -15,11 +15,13 @@
   - Clubbing beyond depth limit into a virtual "+ [X Files/Folders] (Y%)" node
   - Adaptive label suppression (draw truncated label with minimum 3 characters)
   - Legend at bottom (5 levels)
+  - Up navigation button to go back to parent directory
 
   Added interactive features:
   - Click a rectangle to make that item the visualization root (no rescanning)
   - Click on clubbed nodes to expand and navigate into them
   - Hover any rectangle to display a tooltip with FileNode details
+  - Click up arrow to navigate to parent directory
 */
 
 class TreeMapWidget : public QWidget {
@@ -57,7 +59,7 @@ private:
     // interactive state
     QTreeWidgetItem *m_currentRoot = nullptr; // if null, top-level item(0) is used
 
-    // **CHANGED: Store both item pointer AND list of clubbed items for virtual nodes**
+    // Store both item pointer AND list of clubbed items for virtual nodes
     struct RectMapEntry {
         QRectF rect;
         QTreeWidgetItem *item;  // nullptr for virtual club nodes
@@ -66,6 +68,10 @@ private:
     QVector<RectMapEntry> m_rectMap;
 
     QTreeWidgetItem *m_hoveredItem = nullptr;
+
+    // **NEW: Up button state**
+    QRectF m_upButtonRect;
+    bool m_upButtonHovered = false;
 
     // appearance
     const qreal m_margin = 6.0;           // outer margin
@@ -93,7 +99,7 @@ private:
         quint64 size;
         QTreeWidgetItem *ptr; // null for virtual (clubbed) nodes
         bool isVirtual = false;
-        QVector<QTreeWidgetItem*> clubbedItems;  // **NEW: store clubbed items**
+        QVector<QTreeWidgetItem*> clubbedItems;  // store clubbed items
     };
 
     // Build and filter children (applies root-percent filter). Returns sorted vector descending size.
@@ -114,6 +120,12 @@ private:
                          QTreeWidgetItem *parentItem);
     void drawLegend(QPainter &painter, const QRectF &rect);
 
-    // **NEW: Helper to show clubbed items menu**
+    // **NEW: Draw up button**
+    void drawUpButton(QPainter &painter, const QRectF &rect);
+
+    // **NEW: Handle up button click**
+    void navigateUp();
+
+    // Helper to show clubbed items menu
     void showClubbedItemsMenu(const QVector<QTreeWidgetItem*> &items, const QPoint &globalPos);
 };
