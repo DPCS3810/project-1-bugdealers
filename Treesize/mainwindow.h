@@ -72,7 +72,17 @@ private:
     FileNode rootNode;  // Store the root node for later access
     TreeMapWidget *treeMapWidget;       // pointer to your custom widget
     bool graphicalViewEnabled;
+    // Add helper structure for file analysis
+    struct FileInfo {
+        QString name;
+        QString path;
+        quint64 size;
+        QDateTime lastModified;
+        QString extension;
+    };
 
+    // Helper to collect all files from FileNode tree
+    void collectAllFiles(const FileNode &node, QVector<FileInfo> &files);
 
 private slots:
     void onScanClicked();
@@ -96,6 +106,11 @@ private slots:
     void showPieChart(QTreeWidgetItem *item);
     void deleteItem(QTreeWidgetItem *item);
     void renameItem(QTreeWidgetItem *item);
+    void onFreeSpaceClicked();
+    void showTop5BiggestFiles();
+    void checkForDuplicates();
+    void checkByLastModified();
+    void displayByFormat();
 
 
 };

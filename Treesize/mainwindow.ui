@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>606</width>
+    <width>656</width>
     <height>285</height>
    </rect>
   </property>
@@ -203,6 +203,29 @@ border-radius: 5px; /* rounded edges for smooth fill */
          </property>
         </widget>
        </item>
+       <item>
+        <widget class="QPushButton" name="pushButton_10">
+         <property name="styleSheet">
+          <string notr="true">/* Styles for the single button */
+#pushButton_10 {
+    background-color: white;       /* normal button color */
+    color: black;                  /* text color */
+    border: 1px solid #133333;    /* border color */
+    border-radius: 5px;            /* rounded corners */
+    padding: 5px 12px;             /* space inside button */
+}
+
+/* Hover effect for the button */
+#pushButton_10:hover {
+    background-color: #F1FAFA;    /* color on hover */
+}
+</string>
+         </property>
+         <property name="text">
+          <string>Free Space?</string>
+         </property>
+        </widget>
+       </item>
       </layout>
      </widget>
     </item>
@@ -213,7 +236,7 @@ border-radius: 5px; /* rounded edges for smooth fill */
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>606</width>
+     <width>656</width>
      <height>18</height>
     </rect>
    </property>
