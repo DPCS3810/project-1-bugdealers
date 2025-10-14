@@ -72,6 +72,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton_5, &QPushButton::clicked, this, &MainWindow::onCancelScanClicked);
     connect(ui->pushButton, &QPushButton::clicked, this, &MainWindow::onExportClicked);
     connect(ui->pushButton_10, &QPushButton::clicked, this, &MainWindow::onFreeSpaceClicked);
+    // Connect TreeView clicks to graphical view drill-down
+    connect(ui->treeWidget, &QTreeWidget::itemClicked,
+            this, &MainWindow::onTreeItemClicked);
 
 
     // --- Graphical Settings button setup (pushButton_8) ---
@@ -121,6 +124,7 @@ MainWindow::~MainWindow()
 {
     delete ui;
 }
+
 
 void MainWindow::onMaxDepthSelected(int depth)
 {
@@ -1116,6 +1120,33 @@ void MainWindow::renameItem(QTreeWidgetItem *item)
 
     // Automatic rescan
     onReScanClicked();
+}
+
+void MainWindow::onTreeItemClicked(QTreeWidgetItem* item, int column)
+{
+    if (!item)
+        return;
+
+    // --- Drill down into clicked folder/file in graphical view ---
+    graphicalViewEnabled = true;  // activate graphical mode
+    treeMapWidget->setVisible(true);
+
+    treeMapWidget->setCurrentRoot(item);
+
+    treeMapWidget->update();
+
+    QString path = item->text(0);
+    if (item->parent()) {
+        // build full path if available via stored FileNode
+        QVariant nodeVariant = item->data(0, Qt::UserRole);
+        if (nodeVariant.isValid()) {
+            FileNode* node = nodeVariant.value<FileNode*>();
+            if (node)
+                path = node->path;
+        }
+    }
+
+    ui->labelCurrentDir->setText(QString("Current Directory: %1").arg(path));
 }
 
 // ================== FREE SPACE ANALYSIS FUNCTIONS ==================

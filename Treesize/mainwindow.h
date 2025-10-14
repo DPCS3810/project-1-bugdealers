@@ -112,6 +112,7 @@ private slots:
     void checkByLastModified();
     void displayByFormat();
     void onMaxDepthSelected(int depth);
+    void onTreeItemClicked(QTreeWidgetItem* item, int column);
 
 };
 #endif // MAINWINDOW_H
