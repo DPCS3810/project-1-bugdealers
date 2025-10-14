@@ -111,7 +111,7 @@ private slots:
     void checkForDuplicates();
     void checkByLastModified();
     void displayByFormat();
-
+    void onMaxDepthSelected(int depth);
 
 };
 #endif // MAINWINDOW_H

@@ -73,6 +73,33 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->pushButton, &QPushButton::clicked, this, &MainWindow::onExportClicked);
     connect(ui->pushButton_10, &QPushButton::clicked, this, &MainWindow::onFreeSpaceClicked);
 
+
+    // --- Graphical Settings button setup (pushButton_8) ---
+    QMenu *graphicsMenu = new QMenu(this);
+
+    // Submenu for Max Depth
+    QMenu *maxDepthMenu = new QMenu("Max Depth", graphicsMenu);
+
+    // Create depth options 1–5
+    for (int d = 1; d <= 5; ++d) {
+        QAction *depthAction = maxDepthMenu->addAction(QString("Depth %1").arg(d));
+        depthAction->setData(d);
+        connect(depthAction, &QAction::triggered, this, [this, depthAction]() {
+            int chosenDepth = depthAction->data().toInt();
+            onMaxDepthSelected(chosenDepth);
+        });
+    }
+
+    // Add the submenu to the main button menu
+    graphicsMenu->addMenu(maxDepthMenu);
+
+    // Attach menu to the button
+    ui->pushButton_8->setMenu(graphicsMenu);
+
+    // Optional: Show current depth in button text initially
+    ui->pushButton_8->setText("Graphical Settings");
+
+
     // Initialize tree widget
     ui->labelCurrentDir->setText("Current Directory: —");
     ui->treeWidget->setColumnCount(5);
@@ -93,6 +120,14 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::onMaxDepthSelected(int depth)
+{
+    if (treeMapWidget) {
+        treeMapWidget->setMaxDepth(depth);
+        ui->pushButton_8->setText(QString("Graphical Settings (Depth %1)").arg(depth));
+    }
 }
 
 // Recursive DFS scan
@@ -1466,3 +1501,5 @@ void MainWindow::displayByFormat()
     dialog->setLayout(layout);
     dialog->exec();
 }
+
+

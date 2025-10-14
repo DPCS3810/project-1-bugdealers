@@ -39,6 +39,12 @@ public:
     // adjust area-proportional visibility threshold (percent of absolute root size)
     void setMinRootPercent(double pct) { m_minRootPercent = pct; update(); }
 
+    // set maximum recursion depth for rendering (default 5)
+    void setMaxDepth(int depth) {
+        m_maxDepth = depth;
+        update();
+    }
+
     // programmatically set/clear the current visualization root
     void setCurrentRoot(QTreeWidgetItem *item);
     void clearCurrentRoot();
