@@ -12,8 +12,8 @@
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
 #include "filenode.h"
-#include <QCryptographicHash>    // NEW - partial hashing
-#include <QTextBrowser>          // NEW - html breakdown display
+#include <QCryptographicHash>
+#include <QTextBrowser>
 #include <QDialog>
 #include <QVBoxLayout>
 
@@ -52,6 +52,9 @@ private:
 
     bool filterAndHighlightTree(QTreeWidgetItem *item, const QString &query);
     void clearHighlight(QTreeWidgetItem *item);
+
+    //bool filterTreeByType(QTreeWidgetItem *item, const QStringList &extList);
+    bool filterTreeHighlight(QTreeWidgetItem *item, std::function<bool(QTreeWidgetItem*)> matchFunc);
 
     quint64 totalItems = 0;   // total files/folders to scan
     quint64 scannedItems = 0;  // progress count
@@ -129,6 +132,7 @@ private slots:
     void onFreeSpaceClicked();
     void onMaxDepthSelected(int depth);
     void onTreeItemClicked(QTreeWidgetItem* item, int column);
+    void filterByType();
 };
 
 #endif // MAINWINDOW_H

@@ -82,7 +82,7 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onTreeItemClicked);
 
 
-    // --- Graphical Settings button setup (pushButton_8) ---
+    // Graphical Settings button setup (pushButton_8)
     QMenu *graphicsMenu = new QMenu(this);
 
     // Submenu for Max Depth
@@ -166,7 +166,7 @@ void MainWindow::scanDirectory(const QString &path, FileNode &node)
 
         node.children.append(child);
 
-        // ---- update progress ----
+        // update progress
         scannedItems++;
         int percent = (totalItems > 0) ? int((scannedItems * 100) / totalItems) : 0;
         ui->progressBar->setValue(percent);
@@ -231,14 +231,6 @@ void MainWindow::onScanClicked()
 
     // Start elapsed timer
     timer.start();
-
-    /* Create root node
-    FileNode rootNode;
-    rootNode.name = dirPath;
-    rootNode.path = dirPath;
-    rootNode.isFolder = true;
-    */
-    // **CHANGE THIS: Store in member variable**
 
     rootNode = FileNode();  // Clear previous data
     rootNode.name = dirPath;
@@ -488,17 +480,45 @@ void MainWindow::onFilterClicked()
     QAction *sizeAct = menu.addAction("By size");
     QAction *countAct = menu.addAction("By file count");
     QAction *formatAct = menu.addAction("By format");
-    QAction *resetAct = menu.addAction("Reset filter");  // <-- new
+    QAction *typeAct = menu.addAction("Filter by type"); // <-- new
+    QAction *resetAct = menu.addAction("Reset filter");
 
     connect(sizeAct, &QAction::triggered, this, &MainWindow::filterBySize);
     connect(countAct, &QAction::triggered, this, &MainWindow::filterByFileCount);
     connect(formatAct, &QAction::triggered, this, &MainWindow::filterByFormat);
-    connect(resetAct, &QAction::triggered, this, &MainWindow::resetFilter); // <-- new
+    connect(typeAct, &QAction::triggered, this, &MainWindow::filterByType); // <-- new
+    connect(resetAct, &QAction::triggered, this, &MainWindow::resetFilter);
 
     menu.exec(ui->pushButton_3->mapToGlobal(QPoint(0, ui->pushButton_3->height())));
 }
 
+// ------------------ UNIFIED RECURSIVE FILTER ------------------
+bool MainWindow::filterTreeHighlight(QTreeWidgetItem *item, std::function<bool(QTreeWidgetItem*)> matchFunc)
+{
+    bool match = matchFunc(item);
 
+    bool childMatch = false;
+    for (int i = 0; i < item->childCount(); ++i) {
+        bool childVisible = filterTreeHighlight(item->child(i), matchFunc);
+        item->child(i)->setHidden(!childVisible);
+        if (childVisible) childMatch = true;
+    }
+
+    bool visible = match || childMatch;
+    item->setHidden(!visible);
+
+    // Highlight only the matching file
+    QFont font = item->font(0);
+    font.setBold(match);
+    item->setFont(0, font);
+
+    // Expand only the path leading to match
+    item->setExpanded(childMatch && !match);
+
+    return visible;
+}
+
+// ------------------ FILTER BY SIZE ------------------
 void MainWindow::filterBySize()
 {
     bool ok;
@@ -515,7 +535,6 @@ void MainWindow::filterBySize()
 
     bool greater = (choice == "Greater than");
 
-    // Convert entered value into bytes according to currentUnit
     auto toBytes = [this](double v)->quint64 {
         switch (currentUnit) {
         case BYTES: return (quint64) v;
@@ -528,52 +547,16 @@ void MainWindow::filterBySize()
 
     quint64 valueBytes = toBytes(value);
 
-    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        filterTreeBySize(ui->treeWidget->topLevelItem(i), valueBytes, greater);
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+        filterTreeHighlight(ui->treeWidget->topLevelItem(i), [=](QTreeWidgetItem *item){
+            if (item->childCount() > 0) return false;
+            quint64 itemSize = item->data(1, Qt::UserRole).toULongLong();
+            return greater ? (itemSize > valueBytes) : (itemSize < valueBytes);
+        });
+    }
 }
 
-
-bool MainWindow::filterTreeBySize(QTreeWidgetItem *item, quint64 sizeBytes, bool greater)
-{
-    // Get item size from stored data (fall back to parsing text if needed)
-    quint64 itemSize = 0;
-    QVariant v = item->data(1, Qt::UserRole);
-    if (v.isValid()) {
-        itemSize = v.toULongLong();
-    } else {
-        // try parsing displayed text
-        bool ok;
-        QString txt = item->text(1);
-        double parsed = txt.split(" ").first().toDouble(&ok);
-        if (ok) {
-            if (txt.contains("KB", Qt::CaseInsensitive)) {
-                itemSize = (quint64)(parsed * 1024.0);
-            } else if (txt.contains("MB", Qt::CaseInsensitive)) {
-                itemSize = (quint64)(parsed * 1024.0 * 1024.0);
-            } else if (txt.contains("GB", Qt::CaseInsensitive)) {
-                itemSize = (quint64)(parsed * 1024.0 * 1024.0 * 1024.0);
-            } else {
-                itemSize = (quint64)parsed;
-            }
-            item->setData(1, Qt::UserRole, QVariant::fromValue((qulonglong)itemSize));
-        }
-    }
-
-    bool match = greater ? (itemSize > sizeBytes) : (itemSize < sizeBytes);
-
-    bool childMatch = false;
-    for (int i = 0; i < item->childCount(); ++i) {
-        bool childVisible = filterTreeBySize(item->child(i), sizeBytes, greater);
-        item->child(i)->setHidden(!childVisible);
-        if (childVisible) childMatch = true;
-    }
-
-    bool visible = match || childMatch;
-    item->setHidden(!visible);
-    return visible;
-}
-
-
+// ------------------ FILTER BY FILE COUNT ------------------
 void MainWindow::filterByFileCount()
 {
     bool ok;
@@ -589,30 +572,18 @@ void MainWindow::filterByFileCount()
 
     bool greater = (choice == "Greater than");
 
-    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        filterTreeByCount(ui->treeWidget->topLevelItem(i), value, greater);
-}
-
-bool MainWindow::filterTreeByCount(QTreeWidgetItem *item, quint64 count, bool greater)
-{
-    quint64 fileCount = item->text(4).toULongLong();
-    bool match = greater ? (fileCount > count) : (fileCount < count);
-
-    bool childMatch = false;
-    for (int i = 0; i < item->childCount(); ++i) {
-        bool childVisible = filterTreeByCount(item->child(i), count, greater);
-        item->child(i)->setHidden(!childVisible);
-        if (childVisible) childMatch = true;
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+        filterTreeHighlight(ui->treeWidget->topLevelItem(i), [=](QTreeWidgetItem *item){
+            if (item->childCount() > 0) return false;
+            quint64 count = item->text(4).toULongLong();
+            return greater ? (count > value) : (count < value);
+        });
     }
-
-    bool visible = match || childMatch;
-    item->setHidden(!visible);
-    return visible;
 }
 
+// ------------------ FILTER BY FORMAT ------------------
 void MainWindow::filterByFormat()
 {
-    // Collect unique extensions from tree
     QSet<QString> extSet;
     std::function<void(QTreeWidgetItem*)> collectExt = [&](QTreeWidgetItem *item){
         if (item->childCount() == 0) {
@@ -629,55 +600,93 @@ void MainWindow::filterByFormat()
 
     if (extSet.isEmpty()) return;
 
-    QStringList extList;
-    for (const QString &ext : extSet)
-        extList.append(ext);
+    QStringList extList = extSet.values();
 
     bool ok;
     QString choice = QInputDialog::getItem(this, "Filter by format",
                                            "Choose extension:", extList, 0, false, &ok);
     if (!ok) return;
 
-    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        filterTreeByFormat(ui->treeWidget->topLevelItem(i), QStringList() << choice);
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+        filterTreeHighlight(ui->treeWidget->topLevelItem(i), [=](QTreeWidgetItem *item){
+            if (item->childCount() > 0) return false;
+            QString name = item->text(0);
+            int dotIdx = name.lastIndexOf('.');
+            if (dotIdx <= 0) return false;
+            return name.mid(dotIdx).toLower() == choice.toLower();
+        });
+    }
 }
 
-bool MainWindow::filterTreeByFormat(QTreeWidgetItem *item, const QStringList &extList)
+// ------------------ FILTER BY TYPE ------------------
+void MainWindow::filterByType()
 {
-    bool match = false;
-    if (item->childCount() == 0) { // only files
-        QString name = item->text(0);
-        int dotIdx = name.lastIndexOf('.');
-        if (dotIdx > 0) {
-            QString ext = name.mid(dotIdx).toLower();
-            if (extList.contains(ext)) match = true;
-        }
-    }
+    QStringList types = {"Images", "Videos", "Audio", "Documents", "Code", "Archives", "Executables"};
+    bool ok;
+    QString choice = QInputDialog::getItem(this, "Filter by type",
+                                           "Choose type:", types, 0, false, &ok);
+    if (!ok) return;
 
-    bool childMatch = false;
-    for (int i = 0; i < item->childCount(); ++i) {
-        bool childVisible = filterTreeByFormat(item->child(i), extList);
-        item->child(i)->setHidden(!childVisible);
-        if (childVisible) childMatch = true;
-    }
+    QStringList extensions;
+    if (choice == "Images") extensions = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff"};
+    else if (choice == "Videos") extensions = {".mp4", ".avi", ".mkv", ".mov", ".flv"};
+    else if (choice == "Audio") extensions = {".mp3", ".wav", ".flac", ".aac", ".ogg"};
+    else if (choice == "Documents") extensions = {".pdf", ".doc", ".docx", ".txt", ".xls", ".xlsx", ".ppt", ".pptx"};
+    else if (choice == "Code") extensions = {".cpp", ".h", ".py", ".java", ".js", ".cs", ".html", ".css"};
+    else if (choice == "Archives") extensions = {".zip", ".rar", ".7z", ".tar", ".gz"};
+    else if (choice == "Executables") extensions = {".exe", ".bat", ".sh", ".app"};
 
-    bool visible = match || childMatch;
-    item->setHidden(!visible);
-    return visible;
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+        filterTreeHighlight(ui->treeWidget->topLevelItem(i), [=](QTreeWidgetItem *item){
+            if (item->childCount() > 0) return false;
+            QString name = item->text(0);
+            int dotIdx = name.lastIndexOf('.');
+            if (dotIdx <= 0) return false;
+            return extensions.contains(name.mid(dotIdx).toLower());
+        });
+    }
 }
 
+// ------------------ RESET FILTER ------------------
 void MainWindow::resetFilter()
 {
-    // Recursively unhide all items
-    std::function<void(QTreeWidgetItem*)> unhideAll = [&](QTreeWidgetItem *item){
-        if (!item) return;
-        item->setHidden(false);
-        for (int i = 0; i < item->childCount(); ++i)
-            unhideAll(item->child(i));
-    };
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *topItem = ui->treeWidget->topLevelItem(i);
 
-    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        unhideAll(ui->treeWidget->topLevelItem(i));
+        // Unhide top-level item
+        topItem->setHidden(false);
+
+        // Reset font for top-level
+        QFont font = topItem->font(0);
+        font.setBold(false);
+        topItem->setFont(0, font);
+
+        // Collapse children completely
+        for (int j = 0; j < topItem->childCount(); ++j) {
+            QTreeWidgetItem *child = topItem->child(j);
+            child->setHidden(false);
+
+            QFont childFont = child->font(0);
+            childFont.setBold(false);
+            child->setFont(0, childFont);
+
+            // Collapse all grandchildren
+            child->setExpanded(false);
+            for (int k = 0; k < child->childCount(); ++k) {
+                QTreeWidgetItem *grandchild = child->child(k);
+                grandchild->setHidden(false);
+
+                QFont gcFont = grandchild->font(0);
+                gcFont.setBold(false);
+                grandchild->setFont(0, gcFont);
+
+                grandchild->setExpanded(false);
+            }
+        }
+
+        // Keep top-level expanded
+        topItem->setExpanded(true);
+    }
 }
 
 
@@ -1206,7 +1215,7 @@ void MainWindow::onTreeItemClicked(QTreeWidgetItem* item, int column)
     ui->labelCurrentDir->setText(QString("Current Directory: %1").arg(path));
 }
 
-// ================== FREE SPACE ANALYSIS FUNCTIONS ==================
+// FREE SPACE ANALYSIS FUNCTIONS
 
 void MainWindow::onFreeSpaceClicked()
 {
@@ -1312,7 +1321,7 @@ void MainWindow::showSmartDeletionSuggestions()
         return;
     }
 
-    // --- Normalization ---
+    // Normalization
     quint64 maxSize = 1;
     for (const auto &f : allFiles)
         maxSize = std::max(maxSize, f.size);
@@ -1346,7 +1355,7 @@ void MainWindow::showSmartDeletionSuggestions()
 
     int count = std::min(10, static_cast<int>(allFiles.size()));
 
-    // --- Build visual HTML ---
+    // Build visual HTML
     QString html = "<h3>Smart Deletion Suggestions</h3>";
     html += "<p>Files ranked by estimated redundancy potential.</p>";
 
@@ -1369,7 +1378,7 @@ void MainWindow::showSmartDeletionSuggestions()
                     .arg(QString::number(f.typeScore * 100, 'f', 1) + "%");
     }
 
-    // --- Display in a styled dialog ---
+    //  Display in a styled dialog
     QDialog *dialog = new QDialog(this);
     dialog->setWindowTitle("Smart Deletion Suggestions");
     dialog->resize(700, 600);
