@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>656</width>
-    <height>285</height>
+    <width>957</width>
+    <height>319</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -222,7 +222,7 @@ border-radius: 5px; /* rounded edges for smooth fill */
 </string>
          </property>
          <property name="text">
-          <string>Free Space?</string>
+          <string>DiskOver</string>
          </property>
         </widget>
        </item>
@@ -236,8 +236,8 @@ border-radius: 5px; /* rounded edges for smooth fill */
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>656</width>
-     <height>18</height>
+     <width>957</width>
+     <height>26</height>
     </rect>
    </property>
   </widget>

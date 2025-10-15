@@ -12,25 +12,15 @@
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
 #include "filenode.h"
+#include <QCryptographicHash>    // NEW - partial hashing
+#include <QTextBrowser>          // NEW - html breakdown display
+#include <QDialog>
+#include <QVBoxLayout>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
 #endif
-
-/*
-struct FileNode {
-    QString name;
-    QString path;
-    quint64 size = 0;
-    bool isFolder = false;
-    quint64 fileCount = 0;
-    QList<FileNode> children;
-    QDateTime lastModified;
-
-};
-*/
-
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -60,6 +50,9 @@ private:
     bool filterTreeByCount(QTreeWidgetItem *item, quint64 count, bool greater);
     bool filterTreeByFormat(QTreeWidgetItem *item, const QStringList &extList);
 
+    bool filterAndHighlightTree(QTreeWidgetItem *item, const QString &query);
+    void clearHighlight(QTreeWidgetItem *item);
+
     quint64 totalItems = 0;   // total files/folders to scan
     quint64 scannedItems = 0;  // progress count
     QElapsedTimer timer;       // track elapsed time
@@ -72,7 +65,8 @@ private:
     FileNode rootNode;  // Store the root node for later access
     TreeMapWidget *treeMapWidget;       // pointer to your custom widget
     bool graphicalViewEnabled;
-    // Add helper structure for file analysis
+
+    // Existing FileInfo struct (kept as-is)
     struct FileInfo {
         QString name;
         QString path;
@@ -81,8 +75,34 @@ private:
         QString extension;
     };
 
-    // Helper to collect all files from FileNode tree
+    // NEW: Smart-aware file record including per-factor scores and partial hash
+    struct SmartFileInfo {
+        QString name;
+        QString path;
+        quint64 size = 0;
+        QDateTime lastModified;
+        QString extension;
+        QByteArray partialHash;     // partial hash (1MB front+end)
+        double sizeScore = 0.0;
+        double ageScore = 0.0;
+        double typeScore = 0.0;
+        double duplicateScore = 0.0;
+        double totalScore = 0.0;
+    };
+
+    // Helper to collect all files from FileNode tree (existing)
     void collectAllFiles(const FileNode &node, QVector<FileInfo> &files);
+
+    // NEW helper for smart collection (returns SmartFileInfo objects)
+    void collectAllFilesSmart(const FileNode &node, QVector<SmartFileInfo> &files);
+
+    // NEW - partial hashing for duplicate detection
+    QByteArray computePartialHash(const QString &filePath, quint64 fileSize);
+
+    // NEW features
+    void findPotentialDuplicatesSmart();     // Use partial hashing to detect likely duplicates
+    void showSmartDeletionSuggestions();     // Unified scoring + breakdown HTML view
+    void showFileTypePieChart();             // Replace previous bar chart with pie chart
 
 private slots:
     void onScanClicked();
@@ -107,12 +127,8 @@ private slots:
     void deleteItem(QTreeWidgetItem *item);
     void renameItem(QTreeWidgetItem *item);
     void onFreeSpaceClicked();
-    void showTop5BiggestFiles();
-    void checkForDuplicates();
-    void checkByLastModified();
-    void displayByFormat();
     void onMaxDepthSelected(int depth);
     void onTreeItemClicked(QTreeWidgetItem* item, int column);
-
 };
+
 #endif // MAINWINDOW_H

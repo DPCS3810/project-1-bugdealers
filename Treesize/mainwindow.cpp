@@ -36,6 +36,11 @@
 #include <QVBoxLayout>
 #include <QDialog>
 #include <functional>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QTextBrowser>
+#include <algorithm>
+
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -331,15 +336,67 @@ void MainWindow::onSearchClicked()
     }
 }
 
-
 void MainWindow::onSearchTextChanged(const QString &text)
 {
     QString query = text.trimmed();
+
+    // If search is empty, clear highlights and restore view
+    if (query.isEmpty()) {
+        for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
+            clearHighlight(ui->treeWidget->topLevelItem(i));
+            ui->treeWidget->topLevelItem(i)->setHidden(false);
+        }
+        ui->treeWidget->collapseAll();
+        return;
+    }
+
     for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *item = ui->treeWidget->topLevelItem(i);
-        filterTree(item, query);
+        filterAndHighlightTree(ui->treeWidget->topLevelItem(i), query);
     }
 }
+
+bool MainWindow::filterAndHighlightTree(QTreeWidgetItem *item, const QString &query)
+{
+    bool match = item->text(0).contains(query, Qt::CaseInsensitive);
+
+    // Highlight if match found
+    if (match) {
+        item->setBackground(0, QBrush(QColor(255, 255, 150))); // light yellow highlight
+        item->setForeground(0, QBrush(Qt::black));
+    } else {
+        item->setBackground(0, QBrush(Qt::NoBrush));
+        item->setForeground(0, QBrush(Qt::black));
+    }
+
+    bool childMatch = false;
+    for (int i = 0; i < item->childCount(); ++i) {
+        bool childVisible = filterAndHighlightTree(item->child(i), query);
+        item->child(i)->setHidden(!childVisible);
+        if (childVisible)
+            childMatch = true;
+    }
+
+    bool visible = match || childMatch;
+    item->setHidden(!visible);
+
+    // Expand items that have visible children or a match
+    if (visible && (match || childMatch))
+        ui->treeWidget->expandItem(item);
+    else
+        ui->treeWidget->collapseItem(item);
+
+    return visible;
+}
+
+void MainWindow::clearHighlight(QTreeWidgetItem *item)
+{
+    item->setBackground(0, QBrush(Qt::NoBrush));
+    item->setForeground(0, QBrush(Qt::black));
+
+    for (int i = 0; i < item->childCount(); ++i)
+        clearHighlight(item->child(i));
+}
+
 
 bool MainWindow::filterTree(QTreeWidgetItem *item, const QString &query)
 {
@@ -1153,7 +1210,6 @@ void MainWindow::onTreeItemClicked(QTreeWidgetItem* item, int column)
 
 void MainWindow::onFreeSpaceClicked()
 {
-    // Check if a directory has been scanned
     if (currentDirPath.isEmpty()) {
         QMessageBox::information(this, "Free Space Analysis",
                                  "Please scan a directory first before analyzing free space options.");
@@ -1161,376 +1217,248 @@ void MainWindow::onFreeSpaceClicked()
     }
 
     QMenu menu(this);
-    menu.setTitle("Free Space Options");
+    menu.setTitle("Smart Free Space Options");
 
-    QAction *top5Act = menu.addAction("View Top 5 Biggest Files");
-    QAction *duplicatesAct = menu.addAction("Check for Possible Duplicates");
-    QAction *lastModifiedAct = menu.addAction("Check by Last Modified Date");
-    QAction *formatAct = menu.addAction("Display by Format");
+    QAction *duplicatesSmartAct = menu.addAction("Find Potential Duplicates (Smart Hash)");
+    QAction *smartDeletionAct = menu.addAction("Smart Deletion Suggestions");
+    QAction *pieChartAct = menu.addAction("View Storage by File Type (Pie Chart)");
 
-    connect(top5Act, &QAction::triggered, this, &MainWindow::showTop5BiggestFiles);
-    connect(duplicatesAct, &QAction::triggered, this, &MainWindow::checkForDuplicates);
-    connect(lastModifiedAct, &QAction::triggered, this, &MainWindow::checkByLastModified);
-    connect(formatAct, &QAction::triggered, this, &MainWindow::displayByFormat);
+    connect(duplicatesSmartAct, &QAction::triggered, this, &MainWindow::findPotentialDuplicatesSmart);
+    connect(smartDeletionAct, &QAction::triggered, this, &MainWindow::showSmartDeletionSuggestions);
+    connect(pieChartAct, &QAction::triggered, this, &MainWindow::showFileTypePieChart);
 
     menu.exec(ui->pushButton_10->mapToGlobal(QPoint(0, ui->pushButton_10->height())));
 }
 
-void MainWindow::collectAllFiles(const FileNode &node, QVector<FileInfo> &files)
+QByteArray MainWindow::computePartialHash(const QString &filePath, quint64 fileSize)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly))
+        return QByteArray();
+
+    const qint64 chunkSize = 1024 * 1024;  // 1 MB
+    QByteArray buffer;
+
+    // Read first 1 MB
+    buffer += file.read(chunkSize);
+
+    // Read last 1 MB if file is large enough
+    if (fileSize > chunkSize) {
+        file.seek(std::max<qint64>(0, fileSize - chunkSize));
+        buffer += file.read(chunkSize);
+    }
+
+    QCryptographicHash hash(QCryptographicHash::Md5);
+    hash.addData(buffer);
+    return hash.result();
+}
+
+void MainWindow::findPotentialDuplicatesSmart()
+{
+    QVector<SmartFileInfo> allFiles;
+    collectAllFilesSmart(rootNode, allFiles);
+
+    if (allFiles.isEmpty()) {
+        QMessageBox::information(this, "Find Duplicates", "No files found in this directory.");
+        return;
+    }
+
+    // Group by size first
+    QMap<quint64, QVector<SmartFileInfo>> sizeGroups;
+    for (auto &file : allFiles)
+        sizeGroups[file.size].append(file);
+
+    QString message;
+    int groupCount = 0;
+
+    for (auto it = sizeGroups.begin(); it != sizeGroups.end(); ++it) {
+        if (it.value().size() < 2)
+            continue;
+
+        // Compute partial hashes for same-size group
+        QMap<QByteArray, QVector<QString>> hashGroups;
+        for (auto &file : it.value()) {
+            QByteArray hash = computePartialHash(file.path, file.size);
+            if (!hash.isEmpty())
+                hashGroups[hash].append(file.path);
+        }
+
+        for (auto hit = hashGroups.begin(); hit != hashGroups.end(); ++hit) {
+            if (hit.value().size() > 1) {
+                groupCount++;
+                message += QString("\nGroup %1 - %2 files likely identical:\n")
+                               .arg(groupCount)
+                               .arg(hit.value().size());
+                for (const QString &path : hit.value())
+                    message += QString("  • %1\n").arg(path);
+            }
+        }
+    }
+
+    if (groupCount == 0)
+        message = "No duplicate files detected with partial hash check.";
+
+    QMessageBox::information(this, "Smart Duplicate Detection", message);
+}
+
+
+void MainWindow::showSmartDeletionSuggestions()
+{
+    QVector<SmartFileInfo> allFiles;
+    collectAllFilesSmart(rootNode, allFiles);
+
+    if (allFiles.isEmpty()) {
+        QMessageBox::information(this, "Smart Deletion Suggestions", "No files found in this directory.");
+        return;
+    }
+
+    // --- Normalization ---
+    quint64 maxSize = 1;
+    for (const auto &f : allFiles)
+        maxSize = std::max(maxSize, f.size);
+
+    QDateTime now = QDateTime::currentDateTime();
+
+    for (auto &f : allFiles) {
+        // Size score (larger = higher)
+        f.sizeScore = double(f.size) / maxSize;
+
+        // Age score (older = higher)
+        qint64 daysOld = f.lastModified.daysTo(now);
+        f.ageScore = std::min(1.0, double(daysOld) / 365.0); // normalize up to 1 year
+
+        // Type score (based on common redundancies)
+        QString ext = f.extension.toLower();
+        QStringList lowPriority = {"tmp","bak","log","cache"};
+        f.typeScore = lowPriority.contains(ext) ? 1.0 : 0.0;
+
+        // Duplicate score placeholder (if same hash detected, could be updated later)
+        f.duplicateScore = 0.0;
+
+        // Weighted total
+        f.totalScore = 0.4 * f.sizeScore + 0.3 * f.ageScore + 0.2 * f.typeScore + 0.1 * f.duplicateScore;
+    }
+
+    // Sort descending by total score
+    std::sort(allFiles.begin(), allFiles.end(), [](const SmartFileInfo &a, const SmartFileInfo &b) {
+        return a.totalScore > b.totalScore;
+    });
+
+    int count = std::min(10, static_cast<int>(allFiles.size()));
+
+    // --- Build visual HTML ---
+    QString html = "<h3>Smart Deletion Suggestions</h3>";
+    html += "<p>Files ranked by estimated redundancy potential.</p>";
+
+    for (int i = 0; i < count; ++i) {
+        const auto &f = allFiles[i];
+        html += QString("<b>%1.</b> %2<br>"
+                        "<i>%3</i><br>"
+                        "<b>Score:</b> %4<br>"
+                        "<ul>"
+                        "<li>Size factor: %5</li>"
+                        "<li>Age factor: %6</li>"
+                        "<li>Type factor: %7</li>"
+                        "</ul><hr>")
+                    .arg(i + 1)
+                    .arg(f.name)
+                    .arg(f.path)
+                    .arg(QString::number(f.totalScore, 'f', 2))
+                    .arg(QString::number(f.sizeScore * 100, 'f', 1) + "%")
+                    .arg(QString::number(f.ageScore * 100, 'f', 1) + "%")
+                    .arg(QString::number(f.typeScore * 100, 'f', 1) + "%");
+    }
+
+    // --- Display in a styled dialog ---
+    QDialog *dialog = new QDialog(this);
+    dialog->setWindowTitle("Smart Deletion Suggestions");
+    dialog->resize(700, 600);
+
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    QTextBrowser *browser = new QTextBrowser(dialog);
+    browser->setHtml(html);
+    layout->addWidget(browser);
+    dialog->setLayout(layout);
+    dialog->exec();
+}
+
+void MainWindow::showFileTypePieChart()
+{
+    QVector<SmartFileInfo> allFiles;
+    collectAllFilesSmart(rootNode, allFiles);
+
+    if (allFiles.isEmpty()) {
+        QMessageBox::information(this, "View by File Type", "No files found in the scanned directory.");
+        return;
+    }
+
+    QMap<QString, QStringList> categories;
+    categories["Images"] = {"jpg","jpeg","png","gif","bmp","svg","ico","webp"};
+    categories["Videos"] = {"mp4","avi","mkv","mov","wmv","flv","webm","m4v"};
+    categories["Documents"] = {"pdf","doc","docx","txt","rtf","odt"};
+    categories["Audio"] = {"mp3","wav","flac","aac","ogg","wma","m4a"};
+    categories["Archives"] = {"zip","rar","7z","tar","gz","bz2"};
+    categories["Code"] = {"cpp","h","c","py","java","js","html","css","php"};
+
+    QMap<QString, quint64> categorySizes;
+    quint64 otherSize = 0;
+
+    for (const auto &file : allFiles) {
+        bool matched = false;
+        for (auto it = categories.begin(); it != categories.end(); ++it) {
+            if (it.value().contains(file.extension)) {
+                categorySizes[it.key()] += file.size;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) otherSize += file.size;
+    }
+    if (otherSize > 0) categorySizes["Others"] = otherSize;
+
+    QPieSeries *series = new QPieSeries();
+    quint64 totalSize = rootNode.size;
+
+    for (auto it = categorySizes.begin(); it != categorySizes.end(); ++it) {
+        double percent = (totalSize > 0) ? (100.0 * it.value() / totalSize) : 0.0;
+        QPieSlice *slice = series->append(QString("%1 (%2%)").arg(it.key()).arg(percent, 0, 'f', 1), it.value());
+        slice->setLabelVisible(true);
+    }
+
+    QChart *chart = new QChart();
+    chart->addSeries(series);
+    chart->setTitle("Storage Distribution by File Type");
+    chart->legend()->setVisible(true);
+    chart->legend()->setAlignment(Qt::AlignBottom);
+
+    QChartView *view = new QChartView(chart);
+    view->setRenderHint(QPainter::Antialiasing);
+
+    QDialog *dialog = new QDialog(this);
+    dialog->setWindowTitle("Storage by File Type (Pie Chart)");
+    dialog->resize(800, 600);
+
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+    layout->addWidget(view);
+    dialog->setLayout(layout);
+    dialog->exec();
+}
+void MainWindow::collectAllFilesSmart(const FileNode &node, QVector<SmartFileInfo> &files)
 {
     for (const FileNode &child : node.children) {
         if (!child.isFolder) {
-            // It's a file
-            FileInfo info;
+            SmartFileInfo info;
             info.name = child.name;
             info.path = child.path;
             info.size = child.size;
             info.lastModified = child.lastModified;
 
-            // Extract extension
             int dotIdx = child.name.lastIndexOf('.');
-            if (dotIdx > 0) {
-                info.extension = child.name.mid(dotIdx + 1).toLower();
-            } else {
-                info.extension = "no extension";
-            }
+            info.extension = (dotIdx > 0) ? child.name.mid(dotIdx + 1).toLower() : "noext";
 
             files.append(info);
         }
-
-        // Recurse into folders
-        if (child.isFolder) {
-            collectAllFiles(child, files);
-        }
+        if (child.isFolder)
+            collectAllFilesSmart(child, files);
     }
 }
-
-void MainWindow::showTop5BiggestFiles()
-{
-    if (rootNode.size == 0) {
-        QMessageBox::information(this, "Top 5 Biggest Files",
-                                 "No files found in the scanned directory.");
-        return;
-    }
-
-    // Collect all files
-    QVector<FileInfo> allFiles;
-    collectAllFiles(rootNode, allFiles);
-
-    if (allFiles.isEmpty()) {
-        QMessageBox::information(this, "Top 5 Biggest Files",
-                                 "No files found in the scanned directory.");
-        return;
-    }
-
-    // Sort by size (descending)
-    std::sort(allFiles.begin(), allFiles.end(), [](const FileInfo &a, const FileInfo &b) {
-        return a.size > b.size;
-    });
-
-    // Take top 5
-    int count = std::min(5, static_cast<int>(allFiles.size()));
-
-
-    QString message = "These are the top " + QString::number(count) +
-                      " files that take up the most storage in this directory.\n"
-                      "You might want to consider handling these if you would like to free up space:\n\n";
-
-    quint64 totalSize = rootNode.size;
-
-    for (int i = 0; i < count; ++i) {
-        const FileInfo &file = allFiles[i];
-        double percentage = (totalSize > 0) ? (100.0 * file.size / totalSize) : 0.0;
-
-        // Format size
-        QString sizeStr;
-        double val = file.size;
-        if (val >= 1024.0 * 1024.0 * 1024.0) {
-            sizeStr = QString::number(val / (1024.0 * 1024.0 * 1024.0), 'f', 2) + " GB";
-        } else if (val >= 1024.0 * 1024.0) {
-            sizeStr = QString::number(val / (1024.0 * 1024.0), 'f', 2) + " MB";
-        } else if (val >= 1024.0) {
-            sizeStr = QString::number(val / 1024.0, 'f', 2) + " KB";
-        } else {
-            sizeStr = QString::number(val, 'f', 0) + " bytes";
-        }
-
-        message += QString("%1. %2\n   Size: %3 (%4% of total)\n   Path: %5\n\n")
-                       .arg(i + 1)
-                       .arg(file.name)
-                       .arg(sizeStr)
-                       .arg(percentage, 0, 'f', 2)
-                       .arg(file.path);
-    }
-
-    QMessageBox msgBox(this);
-    msgBox.setWindowTitle("Top 5 Biggest Files");
-    msgBox.setText(message);
-    msgBox.setIcon(QMessageBox::Information);
-    msgBox.exec();
-}
-
-void MainWindow::checkForDuplicates()
-{
-    // Collect all files
-    QVector<FileInfo> allFiles;
-    collectAllFiles(rootNode, allFiles);
-
-    if (allFiles.isEmpty()) {
-        QMessageBox::information(this, "Check for Duplicates",
-                                 "No files found in the scanned directory.");
-        return;
-    }
-
-    // Group files by size
-    QMap<quint64, QVector<FileInfo>> sizeGroups;
-    for (const FileInfo &file : allFiles) {
-        if (file.size > 0) {  // Ignore 0-byte files
-            sizeGroups[file.size].append(file);
-        }
-    }
-
-    // Find groups with more than one file
-    QString message;
-    int duplicateGroupCount = 0;
-
-    for (auto it = sizeGroups.begin(); it != sizeGroups.end(); ++it) {
-        if (it.value().size() > 1) {
-            duplicateGroupCount++;
-
-            // Format size
-            quint64 size = it.key();
-            QString sizeStr;
-            double val = size;
-            if (val >= 1024.0 * 1024.0 * 1024.0) {
-                sizeStr = QString::number(val / (1024.0 * 1024.0 * 1024.0), 'f', 2) + " GB";
-            } else if (val >= 1024.0 * 1024.0) {
-                sizeStr = QString::number(val / (1024.0 * 1024.0), 'f', 2) + " MB";
-            } else if (val >= 1024.0) {
-                sizeStr = QString::number(val / 1024.0, 'f', 2) + " KB";
-            } else {
-                sizeStr = QString::number(val, 'f', 0) + " bytes";
-            }
-
-            message += QString("\nGroup %1 - Size: %2 (%3 files)\n")
-                           .arg(duplicateGroupCount)
-                           .arg(sizeStr)
-                           .arg(it.value().size());
-
-            for (const FileInfo &file : it.value()) {
-                message += QString("  • %1\n").arg(file.path);
-            }
-        }
-    }
-
-    if (duplicateGroupCount == 0) {
-        message = "No size matches were found in this directory.";
-    } else {
-        message = QString("These files have the exact same size, they might have the same content.\n"
-                          "You might want to check once.\n\n"
-                          "Found %1 groups of files with matching sizes:\n")
-                      .arg(duplicateGroupCount) + message;
-    }
-
-    QMessageBox msgBox(this);
-    msgBox.setWindowTitle("Check for Duplicates");
-    msgBox.setText(message);
-    msgBox.setIcon(QMessageBox::Information);
-    msgBox.exec();
-}
-
-void MainWindow::checkByLastModified()
-{
-    // Collect all files
-    QVector<FileInfo> allFiles;
-    collectAllFiles(rootNode, allFiles);
-
-    if (allFiles.isEmpty()) {
-        QMessageBox::information(this, "Check by Last Modified",
-                                 "No files found in the scanned directory.");
-        return;
-    }
-
-    // Sort by last modified date (ascending - oldest first)
-    std::sort(allFiles.begin(), allFiles.end(), [](const FileInfo &a, const FileInfo &b) {
-        return a.lastModified < b.lastModified;
-    });
-
-    // Take top 5 oldest
-    int count = std::min(5, static_cast<int>(allFiles.size()));
-
-
-    QString message = "The following files have not been modified in a while.\n"
-                      "They might be redundant:\n\n";
-
-    QDateTime now = QDateTime::currentDateTime();
-
-    for (int i = 0; i < count; ++i) {
-        const FileInfo &file = allFiles[i];
-
-        // Calculate days since modification
-        qint64 daysSince = file.lastModified.daysTo(now);
-
-        // Format size
-        QString sizeStr;
-        double val = file.size;
-        if (val >= 1024.0 * 1024.0 * 1024.0) {
-            sizeStr = QString::number(val / (1024.0 * 1024.0 * 1024.0), 'f', 2) + " GB";
-        } else if (val >= 1024.0 * 1024.0) {
-            sizeStr = QString::number(val / (1024.0 * 1024.0), 'f', 2) + " MB";
-        } else if (val >= 1024.0) {
-            sizeStr = QString::number(val / 1024.0, 'f', 2) + " KB";
-        } else {
-            sizeStr = QString::number(val, 'f', 0) + " bytes";
-        }
-
-        message += QString("%1. %2\n   Size: %3\n   Last Modified: %4 (%5 days ago)\n   Path: %6\n\n")
-                       .arg(i + 1)
-                       .arg(file.name)
-                       .arg(sizeStr)
-                       .arg(file.lastModified.toString("yyyy-MM-dd hh:mm"))
-                       .arg(daysSince)
-                       .arg(file.path);
-    }
-
-    QMessageBox msgBox(this);
-    msgBox.setWindowTitle("Check by Last Modified Date");
-    msgBox.setText(message);
-    msgBox.setIcon(QMessageBox::Information);
-    msgBox.exec();
-}
-
-void MainWindow::displayByFormat()
-{
-    // Collect all files
-    QVector<FileInfo> allFiles;
-    collectAllFiles(rootNode, allFiles);
-
-    if (allFiles.isEmpty()) {
-        QMessageBox::information(this, "Display by Format",
-                                 "No files found in the scanned directory.");
-        return;
-    }
-
-    // Define format categories
-    QMap<QString, QStringList> categories;
-    categories["Images"] = QStringList() << "jpg" << "jpeg" << "png" << "gif" << "bmp" << "svg" << "ico" << "webp";
-    categories["Videos"] = QStringList() << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm" << "m4v";
-    categories["Documents"] = QStringList() << "pdf" << "doc" << "docx" << "txt" << "rtf" << "odt";
-    categories["Spreadsheets"] = QStringList() << "xls" << "xlsx" << "csv" << "ods";
-    categories["Audio"] = QStringList() << "mp3" << "wav" << "flac" << "aac" << "ogg" << "wma" << "m4a";
-    categories["Archives"] = QStringList() << "zip" << "rar" << "7z" << "tar" << "gz" << "bz2";
-    categories["Code"] = QStringList() << "cpp" << "h" << "c" << "py" << "java" << "js" << "html" << "css" << "php";
-
-    // Categorize files and calculate sizes
-    QMap<QString, quint64> categorySizes;
-    quint64 otherSize = 0;
-
-    for (const FileInfo &file : allFiles) {
-        QString ext = file.extension;
-        bool categorized = false;
-
-        for (auto it = categories.begin(); it != categories.end(); ++it) {
-            if (it.value().contains(ext)) {
-                categorySizes[it.key()] += file.size;
-                categorized = true;
-                break;
-            }
-        }
-
-        if (!categorized) {
-            otherSize += file.size;
-        }
-    }
-
-    if (otherSize > 0) {
-        categorySizes["Others"] = otherSize;
-    }
-
-    // Create bar chart
-    QBarSet *set = new QBarSet("Size");
-    QStringList categoryNames;
-    quint64 totalSize = rootNode.size;
-
-    // Sort categories by size (descending)
-    QList<QPair<QString, quint64>> sortedCategories;
-    for (auto it = categorySizes.begin(); it != categorySizes.end(); ++it) {
-        sortedCategories.append(qMakePair(it.key(), it.value()));
-    }
-    std::sort(sortedCategories.begin(), sortedCategories.end(),
-              [](const QPair<QString, quint64> &a, const QPair<QString, quint64> &b) {
-                  return a.second > b.second;
-              });
-
-    // Add to chart
-    for (const auto &pair : sortedCategories) {
-        double sizeMB = pair.second / (1024.0 * 1024.0);
-        *set << sizeMB;
-
-        double percentage = (totalSize > 0) ? (100.0 * pair.second / totalSize) : 0.0;
-        categoryNames << QString("%1\n(%2%)").arg(pair.first).arg(percentage, 0, 'f', 1);
-    }
-
-    QBarSeries *series = new QBarSeries();
-    series->append(set);
-
-    QChart *chart = new QChart();
-    chart->addSeries(series);
-    chart->setTitle("Storage Distribution by File Format");
-    chart->setAnimationOptions(QChart::SeriesAnimations);
-
-    QBarCategoryAxis *axisX = new QBarCategoryAxis();
-    axisX->append(categoryNames);
-    chart->addAxis(axisX, Qt::AlignBottom);
-    series->attachAxis(axisX);
-
-    QValueAxis *axisY = new QValueAxis();
-    axisY->setTitleText("Size (MB)");
-    chart->addAxis(axisY, Qt::AlignLeft);
-    series->attachAxis(axisY);
-
-    chart->legend()->setVisible(false);
-
-    QChartView *chartView = new QChartView(chart);
-    chartView->setRenderHint(QPainter::Antialiasing);
-
-    // Create dialog
-    QDialog *dialog = new QDialog(this);
-    dialog->setWindowTitle("Storage Distribution by Format");
-    dialog->resize(900, 600);
-
-    QVBoxLayout *layout = new QVBoxLayout(dialog);
-    layout->addWidget(chartView);
-
-    // Add summary text
-    QString summary = "\nDetailed Breakdown:\n\n";
-    for (const auto &pair : sortedCategories) {
-        double percentage = (totalSize > 0) ? (100.0 * pair.second / totalSize) : 0.0;
-
-        QString sizeStr;
-        double val = pair.second;
-        if (val >= 1024.0 * 1024.0 * 1024.0) {
-            sizeStr = QString::number(val / (1024.0 * 1024.0 * 1024.0), 'f', 2) + " GB";
-        } else if (val >= 1024.0 * 1024.0) {
-            sizeStr = QString::number(val / (1024.0 * 1024.0), 'f', 2) + " MB";
-        } else if (val >= 1024.0) {
-            sizeStr = QString::number(val / 1024.0, 'f', 2) + " KB";
-        } else {
-            sizeStr = QString::number(val, 'f', 0) + " bytes";
-        }
-
-        summary += QString("%1: %2 (%3%)\n")
-                       .arg(pair.first)
-                       .arg(sizeStr)
-                       .arg(percentage, 0, 'f', 2);
-    }
-
-    QLabel *summaryLabel = new QLabel(summary);
-    summaryLabel->setWordWrap(true);
-    layout->addWidget(summaryLabel);
-
-    dialog->setLayout(layout);
-    dialog->exec();
-}
-
-
