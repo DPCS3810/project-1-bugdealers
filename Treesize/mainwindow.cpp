@@ -793,13 +793,17 @@ void MainWindow::onExportClicked()
     QAction *pdfAct = menu.addAction("Export as PDF");
     QAction *jsonAct = menu.addAction("Export as JSON");
     QAction *csvAct = menu.addAction("Export as CSV");
+    QAction *excelAct = menu.addAction("Export as Excel");
 
     connect(pdfAct, &QAction::triggered, this, &MainWindow::exportAsPDF);
     connect(jsonAct, &QAction::triggered, this, &MainWindow::exportAsJSON);
     connect(csvAct, &QAction::triggered, this, &MainWindow::exportAsCSV);
+    connect(excelAct, &QAction::triggered, this, &MainWindow::exportAsExcel);
 
     menu.exec(ui->pushButton->mapToGlobal(QPoint(0, ui->pushButton->height())));
 }
+
+// ------------------------- CSV EXPORT -------------------------
 
 void MainWindow::exportAsCSV()
 {
@@ -810,27 +814,31 @@ void MainWindow::exportAsCSV()
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
 
     QTextStream out(&file);
-    out << "Name,Size,% of Parent,Last Modified,File Count\n";
+    out << "Hierarchy,Size,% of Parent,Last Modified,File Count\n";
 
-    std::function<void(QTreeWidgetItem*, int)> writeItem = [&](QTreeWidgetItem *item, int level) {
+    std::function<void(QTreeWidgetItem*, QString)> writeItem = [&](QTreeWidgetItem *item, QString prefix) {
         if (!item) return;
-        QString indent(level * 2, ' ');  // indent for subitems
-        out << indent << item->text(0) << ","
-            << item->text(1) << ","
-            << item->text(2) << ","
-            << item->text(3) << ","
-            << item->text(4) << "\n";
 
+        QString displayName = prefix + (prefix.isEmpty() ? "" : "├── ") + item->text(0);
+        out << "\"" << displayName << "\","
+            << "\"" << item->text(1) << "\","
+            << "\"" << item->text(2) << "\","
+            << "\"" << item->text(3) << "\","
+            << "\"" << item->text(4) << "\"\n";
+
+        QString newPrefix = prefix + "│   ";
         for (int i = 0; i < item->childCount(); ++i)
-            writeItem(item->child(i), level + 1);
+            writeItem(item->child(i), newPrefix);
     };
 
     for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        writeItem(ui->treeWidget->topLevelItem(i), 0);
+        writeItem(ui->treeWidget->topLevelItem(i), "");
 
     file.close();
-    QMessageBox::information(this, "Export CSV", "Export completed successfully.");
+    QMessageBox::information(this, "Export CSV", "Export completed successfully with hierarchy preserved.");
 }
+
+// ------------------------- JSON EXPORT -------------------------
 
 void MainWindow::exportAsJSON()
 {
@@ -864,8 +872,10 @@ void MainWindow::exportAsJSON()
     file.write(QJsonDocument(rootArray).toJson(QJsonDocument::Indented));
     file.close();
 
-    QMessageBox::information(this, "Export JSON", "Export completed successfully.");
+    QMessageBox::information(this, "Export JSON", "Export completed successfully with hierarchy preserved.");
 }
+
+// ------------------------- PDF EXPORT -------------------------
 
 void MainWindow::exportAsPDF()
 {
@@ -873,25 +883,29 @@ void MainWindow::exportAsPDF()
     if (filePath.isEmpty()) return;
 
     QString html;
-    html += "<table border='1' cellspacing='0' cellpadding='3'>";
-    html += "<tr><th>Name</th><th>Size</th><th>% of Parent</th><th>Last Modified</th><th>File Count</th></tr>";
+    html += "<h3>Folder Hierarchy Export</h3>";
+    html += "<table border='1' cellspacing='0' cellpadding='4'>";
+    html += "<tr><th>Hierarchy (Name)</th><th>Size</th><th>% of Parent</th><th>Last Modified</th><th>File Count</th></tr>";
 
-    std::function<void(QTreeWidgetItem*, int)> addRows = [&](QTreeWidgetItem *item, int level) {
+    std::function<void(QTreeWidgetItem*, QString)> addRows = [&](QTreeWidgetItem *item, QString prefix) {
         if (!item) return;
+
+        QString displayName = prefix + (prefix.isEmpty() ? "" : "├── ") + item->text(0);
         html += "<tr>";
-        html += "<td>" + QString(level*2, ' ') + item->text(0) + "</td>";
-        html += "<td>" + item->text(1) + "</td>";
-        html += "<td>" + item->text(2) + "</td>";
-        html += "<td>" + item->text(3) + "</td>";
-        html += "<td>" + item->text(4) + "</td>";
+        html += "<td>" + displayName.toHtmlEscaped() + "</td>";
+        html += "<td>" + item->text(1).toHtmlEscaped() + "</td>";
+        html += "<td>" + item->text(2).toHtmlEscaped() + "</td>";
+        html += "<td>" + item->text(3).toHtmlEscaped() + "</td>";
+        html += "<td>" + item->text(4).toHtmlEscaped() + "</td>";
         html += "</tr>";
 
+        QString newPrefix = prefix + "│   ";
         for (int i = 0; i < item->childCount(); ++i)
-            addRows(item->child(i), level + 1);
+            addRows(item->child(i), newPrefix);
     };
 
     for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
-        addRows(ui->treeWidget->topLevelItem(i), 0);
+        addRows(ui->treeWidget->topLevelItem(i), "");
 
     html += "</table>";
 
@@ -904,8 +918,76 @@ void MainWindow::exportAsPDF()
 
     doc.print(&printer);
 
-    QMessageBox::information(this, "Export PDF", "Export completed successfully.");
+    QMessageBox::information(this, "Export PDF", "Export completed successfully with hierarchy preserved.");
 }
+
+// ------------------------- EXCEL EXPORT (CSV-based .xls/.xlsx) -------------------------
+
+void MainWindow::exportAsExcel()
+{
+    QString filePath = QFileDialog::getSaveFileName(
+        this,
+        "Export as Excel",
+        "",
+        "Excel Files (*.csv)"
+        );
+
+    if (filePath.isEmpty())
+        return;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Export Failed", "Unable to create file for export.");
+        return;
+    }
+
+    QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);  // Qt6 encoding
+    out << "Name,Level,Size,% of Parent,Last Modified,File Count\n";
+
+    std::function<void(QTreeWidgetItem*, int)> writeItem =
+        [&](QTreeWidgetItem *item, int level)
+    {
+        QString name = item->text(0);
+
+        // Indent with spaces for visual hierarchy
+        QString indent;
+        for (int i = 0; i < level; ++i)
+            indent += "    "; // 4 spaces per level
+
+        QString indentedName = indent + name;
+
+        // Escape CSV fields (for safety with commas/quotes)
+        auto escape = [](const QString &value) {
+            QString val = value;
+            if (val.contains(",") || val.contains("\""))
+                val.replace("\"", "\"\"");
+            return "\"" + val + "\"";
+        };
+
+        // Write one row
+        out << escape(indentedName) << ","
+            << level << ","
+            << escape(item->text(1)) << ","
+            << escape(item->text(2)) << ","
+            << escape(item->text(3)) << ","
+            << escape(item->text(4)) << "\n";
+
+        // Recurse into children
+        for (int i = 0; i < item->childCount(); ++i)
+            writeItem(item->child(i), level + 1);
+    };
+
+    // Start with top-level items (level 0)
+    for (int i = 0; i < ui->treeWidget->topLevelItemCount(); ++i)
+        writeItem(ui->treeWidget->topLevelItem(i), 0);
+
+    file.close();
+
+    QMessageBox::information(this, "Export Successful",
+                             "Data successfully exported in Excel-compatible format with hierarchy levels.");
+}
+
 
 void MainWindow::onTreeItemCustomContextMenu(const QPoint &pos)
 {

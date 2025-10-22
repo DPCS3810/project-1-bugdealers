@@ -124,6 +124,7 @@ private slots:
     void exportAsPDF();
     void exportAsJSON();
     void exportAsCSV();
+    void exportAsExcel();
     void onTreeItemCustomContextMenu(const QPoint &pos);
     void showFullPath(QTreeWidgetItem *item);
     void showPieChart(QTreeWidgetItem *item);
