@@ -16,6 +16,7 @@ It allows users to **scan directories**, **view file sizes**, **filter and searc
 The project was developed as part of *Design Practices in Computer Science* (CS-3810), focusing on modular design, usability, and maintainable software engineering.
 
 `Treesize` in project-1-budealers repository contains the code and commits. 
+`Detailed Documentation` pdf contains details for developer's to understand and edit the code further. 
 
 ---
  
