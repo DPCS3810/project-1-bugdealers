@@ -60,7 +60,7 @@ Results update dynamically as you type.
 
 ### 4. Filter  
 Filter results based on criteria such as file size, type, or modification date.  
-This helps focus on specific files of interest — for example, large files or media types.  
+This helps focus on specific files of interest : for example, large files or media types.  
 
 ---
 
@@ -76,9 +76,8 @@ The graphical view offers pie charts and other visuals for better insight into s
 
 ---
 
-### 7. Text & Graphical View Settings  
-Adjust the visibility, sorting order, and display settings for both views from the toolbar.  
-You can also switch between *absolute size* and *percentage* display modes.  
+### 7. Text View Settings  
+User has two options : Change the font size (8 - 48) and change the display size formats (KB/MB/GB/Bytes).
 
 ---
 
@@ -103,7 +102,7 @@ It helps you monitor storage usage and available space at a glance.
 ## Context Menu Options 
 
 
-![alt text](Context-Menu-Options.jpg>)
+![alt text](ContextMenuOptions.jpg)
 
 
 ###  Delete  
@@ -135,11 +134,11 @@ Right-click on any folder and select **1-Level Pie Chart** to view a graphical b
 
 ## Implementation Overview  
 TreeSize is built using a modular structure, featuring:  
-- **Scanning Module** — handles directory traversal and data collection.  
-- **TextView & ContextMenu Module** — manages file display and user interactions.  
-- **Toolbar & ProgressBar Module** — provides accessible command controls and visual status.  
-- **Graphical View Module** — generates dynamic rectnagluar representations of the directory structure. 
-- **DiskOver Module** — analyzes free space and disk-level metrics.  
+- **Scanning Module** : handles directory traversal and data collection.  
+- **TextView & ContextMenu Module** : manages file display and user interactions.  
+- **Toolbar & ProgressBar Module** : provides accessible command controls and visual status.  
+- **Graphical View Module** : generates dynamic rectnagluar representations of the directory structure. 
+- **DiskOver Module** : analyzes free space and disk-level metrics.  
 
 ---
 
@@ -154,11 +153,11 @@ TreeSize is built using a modular structure, featuring:
 
 
 ## Contributors  
-**Poulomi Sarkar** 
-**Roshni Pai** 
+- **Poulomi Sarkar** 
+- **Roshni Pai** 
 
 ---
 
 ## Summary  
-TreeSize provides a fast, intuitive way to explore and manage disk usage, combining **analytical insights** with **practical management tools** — an elegant solution for visual file system analysis.
+TreeSize provides a fast, intuitive way to explore and manage disk usage, combining **analytical insights** with **practical management tools** : an elegant solution for visual file system analysis.
 
