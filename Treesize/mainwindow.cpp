@@ -40,6 +40,8 @@
 #include <QFile>
 #include <QTextBrowser>
 #include <algorithm>
+#include <QDesktopServices>
+#include <QUrl>
 
 
 
@@ -999,14 +1001,18 @@ void MainWindow::onTreeItemCustomContextMenu(const QPoint &pos)
     QAction *pieChartAct = menu.addAction("View 1 Level Pie Chart");
     QAction *deleteAct = menu.addAction("Delete");
     QAction *renameAct = menu.addAction("Rename");
+    QAction *openAct = menu.addAction("Open");  // New action
 
     connect(viewPathAct, &QAction::triggered, [this, item]() { showFullPath(item); });
     connect(pieChartAct, &QAction::triggered, [this, item]() { showPieChart(item); });
     connect(deleteAct, &QAction::triggered, [this, item]() { deleteItem(item); });
     connect(renameAct, &QAction::triggered, [this, item]() { renameItem(item); });
+    connect(openAct, &QAction::triggered, [this, item]() { openItem(item); }); // Connect new action
 
     menu.exec(ui->treeWidget->viewport()->mapToGlobal(pos));
 }
+
+
 
 void MainWindow::showFullPath(QTreeWidgetItem *item)
 {
@@ -1551,5 +1557,28 @@ void MainWindow::collectAllFilesSmart(const FileNode &node, QVector<SmartFileInf
         }
         if (child.isFolder)
             collectAllFilesSmart(child, files);
+    }
+}
+
+void MainWindow::openItem(QTreeWidgetItem *item)
+{
+    if (!item) return;
+
+    QString path = item->data(0, Qt::UserRole).toString(); // Assuming you store full path in UserRole
+    QFileInfo info(path);
+
+    if (!info.exists()) {
+        QMessageBox::warning(this, "Open", "The file/folder does not exist.");
+        return;
+    }
+
+    if (!info.isReadable()) {
+        QMessageBox::warning(this, "Open", "You do not have permission to open this file/folder.");
+        return;
+    }
+
+    bool success = QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    if (!success) {
+        QMessageBox::warning(this, "Open", "Failed to open the file/folder.");
     }
 }
