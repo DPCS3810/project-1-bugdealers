@@ -716,7 +716,6 @@ void TreeMapWidget::mouseMoveEvent(QMouseEvent *event)
 
     QPointF pos = event->pos();
 
-    // **NEW: Check if hovering over up button**
     bool wasHovered = m_upButtonHovered;
     m_upButtonHovered = m_upButtonRect.contains(pos);
     if (wasHovered != m_upButtonHovered) {
